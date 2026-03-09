@@ -1,0 +1,102 @@
+spring:
+  application:
+    name: risk-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 200ms
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: risk.bet-placed-consumer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+    listener:
+      ack-mode: manual_immediate
+
+server:
+  port: ${SERVER_PORT:8083}
+  tomcat:
+    threads:
+      max: 200
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      service: risk-service
+
+# ----------------------------------------------------------------------
+# Risk policy defaults (ADR-0009). Per-user / per-market overrides live in
+# Redis hashes — see UserLimitOverride / MarketLimitOverride. The default
+# values below are what is applied when no override exists. Currency keys
+# follow shared-protocol Currency enum (KRW, USD).
+# ----------------------------------------------------------------------
+risk:
+  limits:
+    stake-daily:
+      KRW: 1000000
+      USD: 1000
+    stake-weekly:
+      KRW: 5000000
+      USD: 5000
+    stake-monthly:
+      KRW: 20000000
+      USD: 20000
+    single-bet-max:
+      KRW: 500000
+      USD: 500
+    open-exposure:
+      KRW: 2000000
+      USD: 2000
+    selections-per-minute: 30
+  patterns:
+    rapid-betting:
+      enabled: true
+      window-seconds: 60
+      max-bets: 30
+      action: SUSPECT
+    sudden-stake-increase:
+      enabled: true
+      multiplier-threshold: 10
+      lookback-bets: 10
+      action: SUSPECT
+    repeated-same-selection:
+      enabled: true
+      window-hours: 24
+      max-count: 5
+      action: REVIEW
+
+# Kafka topic mapping. Keeps the names in one place so consumers and
+# producers don't drift; betting-service uses the same names for the
+# upstream side.
+topics:
+  bet-placed: bet.placed
+  risk-limit-violated: risk.limit.violated
+  risk-pattern-suspected: risk.pattern.suspected
