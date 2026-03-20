@@ -29,6 +29,9 @@
 
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
+        <!-- Required so Spring MVC can resolve @PathVariable / @RequestParam names
+             via reflection without the caller having to repeat them in the annotation. -->
+        <maven.compiler.parameters>true</maven.compiler.parameters>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <spring-boot.version>3.2.11</spring-boot.version>
