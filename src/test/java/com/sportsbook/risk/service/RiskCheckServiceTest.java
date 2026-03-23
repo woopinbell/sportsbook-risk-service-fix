@@ -10,6 +10,7 @@ import com.sportsbook.protocol.value.Currency;
 import com.sportsbook.protocol.value.Money;
 import com.sportsbook.risk.counter.LimitType;
 import com.sportsbook.risk.counter.SlidingWindowCounter;
+import com.sportsbook.risk.event.RiskEventPublisher;
 import com.sportsbook.risk.limit.LimitResolver;
 import com.sportsbook.risk.pattern.PatternContext;
 import com.sportsbook.risk.pattern.PatternMatch;
@@ -40,6 +41,7 @@ class RiskCheckServiceTest {
   @Mock private LimitResolver limitResolver;
   @Mock private SlidingWindowCounter counter;
   @Mock private RuleEngine ruleEngine;
+  @Mock private RiskEventPublisher publisher;
 
   private RiskCheckService service;
   private RiskLimitProperties policy;
@@ -56,7 +58,8 @@ class RiskCheckServiceTest {
             Map.of(Currency.KRW, 2_000_000L), // open-exposure (unused)
             30);
     service =
-        new RiskCheckService(policy, limitResolver, counter, ruleEngine, new SimpleMeterRegistry());
+        new RiskCheckService(
+            policy, limitResolver, counter, ruleEngine, publisher, new SimpleMeterRegistry());
   }
 
   @Test

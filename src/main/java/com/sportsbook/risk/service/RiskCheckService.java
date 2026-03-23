@@ -4,6 +4,7 @@ import com.sportsbook.protocol.value.Currency;
 import com.sportsbook.risk.counter.LimitKeys;
 import com.sportsbook.risk.counter.LimitType;
 import com.sportsbook.risk.counter.SlidingWindowCounter;
+import com.sportsbook.risk.event.RiskEventPublisher;
 import com.sportsbook.risk.limit.LimitResolver;
 import com.sportsbook.risk.pattern.PatternContext;
 import com.sportsbook.risk.pattern.PatternMatch;
@@ -51,6 +52,7 @@ public class RiskCheckService {
   private final LimitResolver limitResolver;
   private final SlidingWindowCounter counter;
   private final RuleEngine ruleEngine;
+  private final RiskEventPublisher publisher;
   private final MeterRegistry meters;
   private final Timer checkTimer;
 
@@ -59,11 +61,13 @@ public class RiskCheckService {
       LimitResolver limitResolver,
       SlidingWindowCounter counter,
       RuleEngine ruleEngine,
+      RiskEventPublisher publisher,
       MeterRegistry meters) {
     this.policy = policy;
     this.limitResolver = limitResolver;
     this.counter = counter;
     this.ruleEngine = ruleEngine;
+    this.publisher = publisher;
     this.meters = meters;
     this.checkTimer =
         Timer.builder("risk_check_latency_seconds")
@@ -82,6 +86,7 @@ public class RiskCheckService {
     long singleMax = policy.singleBetMax(currency);
     if (stake > singleMax) {
       return reject(
+          cmd,
           new LimitRejection(
               "SINGLE_BET_MAX_EXCEEDED",
               currency,
@@ -97,6 +102,7 @@ public class RiskCheckService {
       long limit = limitResolver.resolveUser(cmd.userId(), type, currency);
       if (current + stake > limit) {
         return reject(
+            cmd,
             new LimitRejection(
                 type.name() + "_LIMIT_EXCEEDED",
                 currency,
@@ -115,6 +121,7 @@ public class RiskCheckService {
         limitResolver.resolveUser(cmd.userId(), LimitType.SELECTIONS_PER_MINUTE, currency);
     if (selCurrent + requestedSelections > selLimit) {
       return reject(
+          cmd,
           new LimitRejection(
               "SELECTIONS_PER_MINUTE_LIMIT_EXCEEDED",
               null,
@@ -127,12 +134,12 @@ public class RiskCheckService {
     PatternContext ctx =
         new PatternContext(cmd.userId(), cmd.betId(), cmd.stake(), cmd.selectionIds(), cmd.now());
     List<PatternMatch> matches = ruleEngine.evaluate(ctx);
-    matches.forEach(
-        m ->
-            meters
-                .counter(
-                    "risk_pattern_flags_total", "rule", m.ruleName(), "action", m.action().name())
-                .increment());
+    for (PatternMatch m : matches) {
+      meters
+          .counter("risk_pattern_flags_total", "rule", m.ruleName(), "action", m.action().name())
+          .increment();
+      publisher.publishPatternSuspected(cmd.userId(), m, cmd.now());
+    }
 
     Optional<PatternMatch> block =
         matches.stream().filter(m -> m.action() == PatternAction.BLOCK).findFirst();
@@ -148,8 +155,9 @@ public class RiskCheckService {
     return RiskCheckOutcome.approved(matches);
   }
 
-  private RiskCheckOutcome reject(LimitRejection rejection) {
+  private RiskCheckOutcome reject(RiskCheckCommand cmd, LimitRejection rejection) {
     meters.counter("risk_limit_violations_total", "reason", rejection.reason()).increment();
+    publisher.publishLimitViolated(cmd.userId(), rejection, cmd.now());
     return RiskCheckOutcome.rejectedByLimit(rejection, List.of());
   }
 }
