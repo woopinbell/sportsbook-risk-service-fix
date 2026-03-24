@@ -89,10 +89,15 @@
         <!-- Spring Data Redis (Lettuce by default). The sliding-window
              counters live in Redis sorted sets; per-user / per-market limit
              overrides live in Redis hashes (repository decision: this service
-             does not use a relational database in V1). -->
+             does not use a relational database in V1). commons-pool2 is
+             required for Lettuce connection pooling (spring.data.redis.lettuce.pool). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
         </dependency>
 
         <!-- Spring Kafka — consume bet.placed (event sourcing for counters)
