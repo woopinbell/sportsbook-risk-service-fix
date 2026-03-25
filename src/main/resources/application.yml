@@ -5,7 +5,12 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      timeout: 200ms
+      # command timeout: failure ceiling, not the SLA. 200ms was too aggressive —
+      # cold-start connection init (boot, GC, load) exceeded it and produced false
+      # RedisCommandTimeoutException on the first /check (betting saw read-timeout 500s).
+      # Normal checks still return in ~30ms; this is just the upper bound.
+      timeout: 1s
+      connect-timeout: 5s
       lettuce:
         pool:
           enabled: true
