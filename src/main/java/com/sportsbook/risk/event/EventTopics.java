@@ -11,7 +11,7 @@ public record EventTopics(String betPlaced, String riskLimitViolated, String ris
 
   public EventTopics {
     if (betPlaced == null || betPlaced.isBlank()) {
-      betPlaced = "bet.placed";
+      betPlaced = "bet.placed.v1";
     }
     if (riskLimitViolated == null || riskLimitViolated.isBlank()) {
       riskLimitViolated = "risk.limit.violated";

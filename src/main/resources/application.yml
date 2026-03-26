@@ -99,9 +99,9 @@ risk:
       action: REVIEW
 
 # Kafka topic mapping. Keeps the names in one place so consumers and
-# producers don't drift; betting-service uses the same names for the
-# upstream side.
+# producers don't drift. bet-placed must match the upstream publisher:
+# betting-service BetEventFactory.TOPIC = "bet.placed.v1".
 topics:
-  bet-placed: bet.placed
+  bet-placed: bet.placed.v1
   risk-limit-violated: risk.limit.violated
   risk-pattern-suspected: risk.pattern.suspected

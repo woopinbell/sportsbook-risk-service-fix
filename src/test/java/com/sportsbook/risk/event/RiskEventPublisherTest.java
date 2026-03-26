@@ -27,7 +27,7 @@ class RiskEventPublisherTest {
 
   private static final Instant NOW = Instant.parse("2026-05-28T10:00:00Z");
   private static final EventTopics TOPICS =
-      new EventTopics("bet.placed", "risk.limit.violated", "risk.pattern.suspected");
+      new EventTopics("bet.placed.v1", "risk.limit.violated", "risk.pattern.suspected");
 
   @Mock private KafkaTemplate<String, byte[]> kafka;
 
