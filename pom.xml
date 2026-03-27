@@ -35,7 +35,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <spring-boot.version>3.2.11</spring-boot.version>
-        <shared-protocol.version>0.1.0-SNAPSHOT</shared-protocol.version>
+        <shared-protocol.version>0.2.0-SNAPSHOT</shared-protocol.version>
         <testcontainers.version>1.20.3</testcontainers.version>
         <logstash-encoder.version>7.4</logstash-encoder.version>
 
