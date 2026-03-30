@@ -48,18 +48,26 @@ if #expired > 0 then
             end
         end
     end
-    if expiredSum > 0 then
+    redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. tostring(cutoff))
+    if redis.call('ZCARD', KEYS[1]) == 0 then
+        redis.call('DEL', KEYS[2])
+    elseif expiredSum > 0 then
         redis.call('DECRBY', KEYS[2], expiredSum)
     end
-    redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. tostring(cutoff))
+elseif redis.call('ZCARD', KEYS[1]) == 0 then
+    -- A sum without any members cannot be valid. Removing it also heals the
+    -- residual sum left by the pre-NX implementation after its last member expired.
+    redis.call('DEL', KEYS[2])
 end
 
 -- 2. Append the new entry if this call is a record (peek calls pass an
 --    empty member and amount=0). The sorted set score is the event time
 --    in ms, so future cleanups can use a single ZRANGEBYSCORE cut.
 if amount > 0 and member ~= '' then
-    redis.call('ZADD', KEYS[1], nowMs, member)
-    redis.call('INCRBY', KEYS[2], amount)
+    local inserted = redis.call('ZADD', KEYS[1], 'NX', nowMs, member)
+    if inserted == 1 then
+        redis.call('INCRBY', KEYS[2], amount)
+    end
 end
 
 -- 3. Refresh TTLs on both keys. EXPIRE on a missing key is a no-op so it

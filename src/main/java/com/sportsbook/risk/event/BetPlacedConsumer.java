@@ -11,6 +11,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -49,7 +50,10 @@ public class BetPlacedConsumer {
       topics = "${topics.bet-placed}",
       groupId = "${spring.kafka.consumer.group-id}",
       containerFactory = "kafkaListenerContainerFactory")
-  public void onBetPlaced(@Payload byte[] payload, @Header(KafkaHeaders.RECEIVED_KEY) String key) {
+  public void onBetPlaced(
+      @Payload byte[] payload,
+      @Header(KafkaHeaders.RECEIVED_KEY) String key,
+      Acknowledgment acknowledgment) {
     BetPlacedRequested event = AvroCodec.decode(payload, BetPlacedRequested.class);
     String userId = event.getUserId().toString();
     String betId = event.getBetId().toString();
@@ -75,6 +79,7 @@ public class BetPlacedConsumer {
           now);
     }
     history.recordBet(userId, betId, stakeAmount, selectionIds, now);
+    acknowledgment.acknowledge();
 
     log.debug(
         "Recorded bet.placed userId={} betId={} stake={} key={}", userId, betId, stakeAmount, key);

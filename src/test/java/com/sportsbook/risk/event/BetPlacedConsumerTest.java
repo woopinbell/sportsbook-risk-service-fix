@@ -1,8 +1,10 @@
 package com.sportsbook.risk.event;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,12 +22,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.kafka.support.Acknowledgment;
 
 @ExtendWith(MockitoExtension.class)
 class BetPlacedConsumerTest {
 
   @Mock private SlidingWindowCounter counter;
   @Mock private UserBetHistoryWriter history;
+  @Mock private Acknowledgment acknowledgment;
 
   @Test
   void recordsStakeAndSelectionCountersPlusHistory() {
@@ -43,7 +47,7 @@ class BetPlacedConsumerTest {
             .setRequestedAt(java.time.Instant.ofEpochMilli(1748432400000L))
             .build();
 
-    consumer.onBetPlaced(AvroCodec.encode(event), "u-1");
+    consumer.onBetPlaced(AvroCodec.encode(event), "u-1", acknowledgment);
 
     // Three stake-window writes: daily, weekly, monthly.
     verify(counter, times(3))
@@ -57,6 +61,7 @@ class BetPlacedConsumerTest {
             eq(LimitType.SELECTIONS_PER_MINUTE.window()),
             any());
     verify(history).recordBet(eq("u-1"), eq("b-1"), eq(10_000L), eq(List.of("s-1", "s-2")), any());
+    verify(acknowledgment).acknowledge();
   }
 
   @Test
@@ -75,7 +80,7 @@ class BetPlacedConsumerTest {
             .setRequestedAt(java.time.Instant.ofEpochMilli(1748432400000L))
             .build();
 
-    consumer.onBetPlaced(AvroCodec.encode(event), "u-1");
+    consumer.onBetPlaced(AvroCodec.encode(event), "u-1", acknowledgment);
 
     verify(counter, never())
         .record(
@@ -85,6 +90,33 @@ class BetPlacedConsumerTest {
             eq(LimitType.SELECTIONS_PER_MINUTE.window()),
             any());
     verify(history).recordBet(eq("u-1"), eq("b-1"), eq(5_000L), eq(List.of()), any());
+    verify(acknowledgment).acknowledge();
+  }
+
+  @Test
+  void leavesOffsetUncommittedWhenAWriteFails() {
+    BetPlacedConsumer consumer = new BetPlacedConsumer(counter, history);
+    BetPlacedRequested event =
+        BetPlacedRequested.newBuilder()
+            .setBetId("b-1")
+            .setUserId("u-1")
+            .setSlipType(BetSlipTypeTag.SINGLE)
+            .setSystemMinWins(null)
+            .setSystemTotalSelections(null)
+            .setSelections(List.of(sel("s-1")))
+            .setStake(Money.newBuilder().setAmount(5_000L).setCurrency("KRW").build())
+            .setIdempotencyKey("idem-3")
+            .setRequestedAt(java.time.Instant.ofEpochMilli(1748432400000L))
+            .build();
+    doThrow(new IllegalStateException("redis unavailable"))
+        .when(history)
+        .recordBet(any(), any(), anyLong(), any(), any());
+
+    assertThatThrownBy(() -> consumer.onBetPlaced(AvroCodec.encode(event), "u-1", acknowledgment))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("redis unavailable");
+
+    verify(acknowledgment, never()).acknowledge();
   }
 
   private static RequestedSelection sel(String selectionId) {

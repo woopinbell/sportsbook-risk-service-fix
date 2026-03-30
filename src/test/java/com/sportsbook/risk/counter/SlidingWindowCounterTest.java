@@ -97,6 +97,31 @@ class SlidingWindowCounterTest {
     // After 91 seconds bet-2 (scored at T0+30) is also outside.
     long afterSecondExpiry = counter.currentSum(key, MINUTE, T0.plusSeconds(91));
     assertThat(afterSecondExpiry).isZero();
+    assertThat(template.hasKey(key)).isFalse();
+    assertThat(template.hasKey(LimitKeys.sumKey(key))).isFalse();
+  }
+
+  @Test
+  void duplicateDeliveryContributesOnlyOnce() {
+    String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+    String member = LimitKeys.encodeMember("bet-1", STAKE_A);
+
+    for (int attempt = 0; attempt < 100; attempt++) {
+      counter.record(key, member, STAKE_A, MINUTE, T0.plusMillis(attempt));
+    }
+
+    assertThat(counter.currentSum(key, MINUTE, T0.plusSeconds(1))).isEqualTo(STAKE_A);
+  }
+
+  @Test
+  void differentBetsAtTheSameTimestampRemainDistinct() {
+    String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+
+    counter.record(key, LimitKeys.encodeMember("bet-1", STAKE_A), STAKE_A, MINUTE, T0);
+    long afterSecond =
+        counter.record(key, LimitKeys.encodeMember("bet-2", STAKE_B), STAKE_B, MINUTE, T0);
+
+    assertThat(afterSecond).isEqualTo(STAKE_A + STAKE_B);
   }
 
   @Test
