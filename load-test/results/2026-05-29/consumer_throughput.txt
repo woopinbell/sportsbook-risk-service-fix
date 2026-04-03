@@ -1,0 +1,2 @@
+Publishing 100000 records of 256B to bet.placed at rate=-1
+100000 records sent, 173010.380623 records/sec (42.24 MB/sec), 202.61 ms avg latency, 280.00 ms max latency, 210 ms 50th, 251 ms 95th, 257 ms 99th, 258 ms 99.9th.
