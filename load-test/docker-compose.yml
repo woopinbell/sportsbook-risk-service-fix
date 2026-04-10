@@ -18,7 +18,7 @@ services:
     image: confluentinc/cp-kafka:7.6.1
     container_name: risk-load-kafka
     ports:
-      - "9094:9092"
+      - "9094:9094"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -37,7 +37,11 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      # Avoid starting a Kafka JVM for every probe: on a constrained Docker daemon the 4-second
+      # timeout leaves overlapping TopicCommand processes that can prevent the broker becoming
+      # ready. The host-side service readiness gate performs the subsequent protocol check.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/9092'"]
       interval: 4s
       timeout: 4s
       retries: 30
+      start_period: 30s
