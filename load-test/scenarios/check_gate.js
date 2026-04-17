@@ -62,7 +62,7 @@ export default function () {
   });
 
   check(response, {
-    'status is 200': (result) => result.status === 200,
-    'risk decision is approved': (result) => result.json('approved') === true,
+    'response is HTTP 200 with an approved decision': (result) =>
+      result.status === 200 && result.json('approved') === true,
   });
 }

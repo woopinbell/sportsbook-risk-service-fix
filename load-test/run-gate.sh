@@ -52,12 +52,17 @@ else
   RUN_COUNT=5
 fi
 
-for command in docker k6 curl jq java redis-cli; do
+for command in docker k6 curl jq java nc redis-cli; do
   if ! command -v "${command}" > /dev/null 2>&1; then
     echo "Missing required command: ${command}" >&2
     exit 2
   fi
 done
+
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=all)" ]]; then
+  echo "Refusing to measure a dirty source tree" >&2
+  exit 2
+fi
 
 if [[ -e "${OUTPUT_DIR}" ]]; then
   echo "Refusing to overwrite an existing evidence directory: ${OUTPUT_DIR}" >&2
@@ -67,6 +72,7 @@ mkdir -p "${OUTPUT_DIR}"
 
 cleanup() {
   local exit_code=$?
+  trap - EXIT
   set +e
   if [[ -n "${SERVICE_PID}" ]] && kill -0 "${SERVICE_PID}" > /dev/null 2>&1; then
     kill "${SERVICE_PID}"
@@ -77,18 +83,25 @@ cleanup() {
   if [[ "${KEEP_INFRA:-0}" != "1" ]]; then
     docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans \
       > "${OUTPUT_DIR}/compose-down.log" 2>&1
+    docker compose -f "${COMPOSE_FILE}" ps --all \
+      > "${OUTPUT_DIR}/compose-ps-after-down.txt" 2>&1
+    if [[ -n "$(docker compose -f "${COMPOSE_FILE}" ps -aq)" ]] \
+      || nc -z localhost 6390 || nc -z localhost 9094; then
+      echo "Risk load infrastructure remained after cleanup" \
+        > "${OUTPUT_DIR}/cleanup-failure.txt"
+      exit_code=1
+    fi
   fi
-  return "${exit_code}"
+  exit "${exit_code}"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 if [[ -n "${MAVEN_REPO_LOCAL:-}" ]]; then
-  "${REPO_ROOT}/mvnw" -q -B -Dmaven.repo.local="${MAVEN_REPO_LOCAL}" -DskipTests package \
-    > "${OUTPUT_DIR}/maven-package.log" 2>&1
+  "${REPO_ROOT}/mvnw" -B -Dmaven.repo.local="${MAVEN_REPO_LOCAL}" clean verify \
+    > "${OUTPUT_DIR}/maven-verify.log" 2>&1
 else
-  "${REPO_ROOT}/mvnw" -q -B -DskipTests package \
-    > "${OUTPUT_DIR}/maven-package.log" 2>&1
+  "${REPO_ROOT}/mvnw" -B clean verify > "${OUTPUT_DIR}/maven-verify.log" 2>&1
 fi
 
 JAR_PATH="${REPO_ROOT}/target/risk-service-0.1.0-SNAPSHOT.jar"
@@ -99,6 +112,8 @@ fi
 
 {
   echo "source_commit=$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+  echo "source_tree=$(git -C "${REPO_ROOT}" rev-parse 'HEAD^{tree}')"
+  echo "working_tree_clean=true"
   echo "profile=${PROFILE}"
   echo "stage=${STAGE}"
   echo "measured_runs=${RUN_COUNT}"
@@ -113,7 +128,7 @@ fi
   echo "threshold_error_rate_lt=0.001"
   echo "threshold_checks_rate_gt=0.999"
   echo "threshold_dropped_iterations_eq=0"
-  shasum -a 256 "${JAR_PATH}"
+  shasum -a 256 "${JAR_PATH}" "${BASH_SOURCE[0]}" "${CHECK_SCRIPT}" "${COMPOSE_FILE}"
 } > "${OUTPUT_DIR}/manifest.txt"
 
 case "${PROFILE}" in

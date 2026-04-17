@@ -131,6 +131,13 @@ class BetPlacedConsumerIntegrationTest {
                 Duration.ofMinutes(1),
                 OCCURRED_AT))
         .isEqualTo(1L);
+    assertThat(
+            history.countSelectionBets(
+                userId,
+                event.getSelections().get(1).getSelectionId().toString(),
+                Duration.ofMinutes(1),
+                OCCURRED_AT))
+        .isEqualTo(1L);
     assertThat(committedOffset()).isEqualTo(1L);
     verify(history, atLeast(2)).recordBet(any(), any(), any(Long.class), any(), any());
   }
@@ -147,8 +154,11 @@ class BetPlacedConsumerIntegrationTest {
       var offsets = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata().get();
       var offset = offsets.get(new TopicPartition(TOPIC, 0));
       return offset == null ? -1L : offset.offset();
-    } catch (Exception ignored) {
-      return -1L;
+    } catch (InterruptedException failure) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while inspecting the committed offset", failure);
+    } catch (Exception failure) {
+      throw new AssertionError("failed to inspect the committed offset", failure);
     }
   }
 
