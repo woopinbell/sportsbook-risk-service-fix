@@ -30,6 +30,7 @@ local amount = tonumber(ARGV[4])
 local ttlSeconds = tonumber(ARGV[5])
 
 local cutoff = nowMs - windowMs
+local current = redis.call('GET', KEYS[2])
 
 -- 1. Find expired members, sum the amounts they encoded, then DECRBY the
 --    sum key and trim them out of the sorted set. Doing the per-member
@@ -51,13 +52,17 @@ if #expired > 0 then
     redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. tostring(cutoff))
     if redis.call('ZCARD', KEYS[1]) == 0 then
         redis.call('DEL', KEYS[2])
+        current = false
     elseif expiredSum > 0 then
-        redis.call('DECRBY', KEYS[2], expiredSum)
+        current = redis.call('DECRBY', KEYS[2], expiredSum)
     end
-elseif redis.call('ZCARD', KEYS[1]) == 0 then
+elseif current ~= false and redis.call('ZCARD', KEYS[1]) == 0 then
     -- A sum without any members cannot be valid. Removing it also heals the
     -- residual sum left by the pre-NX implementation after its last member expired.
+    -- Check the sorted set only when a sum exists so an empty read does not pay
+    -- for ZCARD and DEL calls against two keys that are both already absent.
     redis.call('DEL', KEYS[2])
+    current = false
 end
 
 -- 2. Append the new entry if this call is a record (peek calls pass an
@@ -66,7 +71,7 @@ end
 if amount > 0 and member ~= '' then
     local inserted = redis.call('ZADD', KEYS[1], 'NX', nowMs, member)
     if inserted == 1 then
-        redis.call('INCRBY', KEYS[2], amount)
+        current = redis.call('INCRBY', KEYS[2], amount)
     end
 end
 
@@ -75,8 +80,7 @@ end
 redis.call('EXPIRE', KEYS[1], ttlSeconds)
 redis.call('EXPIRE', KEYS[2], ttlSeconds)
 
--- 4. Return the current sum, defaulting to 0 when the sum key was missing.
-local current = redis.call('GET', KEYS[2])
+-- 4. Return the cached current sum, defaulting to 0 when the sum key was missing.
 if current == false then
     return 0
 end

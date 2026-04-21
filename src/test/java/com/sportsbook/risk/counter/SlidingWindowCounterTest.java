@@ -71,6 +71,26 @@ class SlidingWindowCounterTest {
   }
 
   @Test
+  void emptyReadReturnsZeroWithoutCreatingCounterKeys() {
+    String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+
+    assertThat(counter.currentSum(key, MINUTE, T0)).isZero();
+    assertThat(template.hasKey(key)).isFalse();
+    assertThat(template.hasKey(LimitKeys.sumKey(key))).isFalse();
+  }
+
+  @Test
+  void readDeletesAnOrphanedSumKey() {
+    String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+    String sumKey = LimitKeys.sumKey(key);
+    template.opsForValue().set(sumKey, Long.toString(STAKE_A));
+
+    assertThat(counter.currentSum(key, MINUTE, T0)).isZero();
+    assertThat(template.hasKey(key)).isFalse();
+    assertThat(template.hasKey(sumKey)).isFalse();
+  }
+
+  @Test
   void multipleRecordsAccumulateWithinWindow() {
     String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
 

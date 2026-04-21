@@ -1,0 +1,14 @@
+variant	stage	run	status	p50_ms	p95_ms	p99_ms	error_rate	checks_rate	dropped_iterations
+head	baseline	1	FAIL	2.344	7.774	40.603	0	1	2
+head	baseline	2	FAIL	4.715	16.004	70.665	0	1	143
+head	baseline	3	FAIL	3.960	20.964	118.361	0	1	141
+head	baseline	4	FAIL	4.716	34.412	140.077	0	1	61
+head	baseline	5	PASS	3.796	8.251	17.482	0	1	0
+lua-empty-read	screen	1	PASS	3.287	6.315	12.841	0	1	0
+lua-empty-read	screen	2	PASS	4.158	8.003	13.814	0	1	0
+lua-empty-read	screen	3	PASS	4.013	8.561	16.612	0	1	0
+lua-empty-read	final	1	PASS	4.340	10.528	21.326	0	1	0
+lua-empty-read	final	2	PASS	3.973	7.817	15.270	0	1	0
+lua-empty-read	final	3	PASS	4.007	9.558	17.823	0	1	0
+lua-empty-read	final	4	PASS	3.694	6.943	12.633	0	1	0
+lua-empty-read	final	5	PASS	3.572	6.427	11.217	0	1	0
