@@ -1,0 +1,6 @@
+variant	stage	run	status	p50_ms	p95_ms	p99_ms	error_rate	checks_rate	dropped_iterations
+empty-absent-fastpath	final	1	FAIL	2.491	11.209	34.686	0	1	0
+empty-absent-fastpath	final	2	FAIL	2.681	12.757	33.971	0	1	0
+empty-absent-fastpath	final	3	PASS	2.605	11.745	28.903	0	1	0
+empty-absent-fastpath	final	4	PASS	2.601	11.169	27.246	0	1	0
+empty-absent-fastpath	final	5	PASS	2.620	10.701	22.591	0	1	0

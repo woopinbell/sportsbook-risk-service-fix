@@ -32,6 +32,18 @@ local ttlSeconds = tonumber(ARGV[5])
 local cutoff = nowMs - windowMs
 local current = redis.call('GET', KEYS[2])
 
+-- A read-only peek of a completely absent counter has nothing to clean up.
+-- Keep malformed partial states on the normal repair path: an orphan sum must
+-- still be deleted, and a sorted set without its sum must still receive the
+-- same cleanup and TTL handling as before. Record calls also stay on the full
+-- path so their ZADD NX, INCRBY, and expiry semantics do not change.
+if current == false
+    and amount == 0
+    and member == ''
+    and redis.call('EXISTS', KEYS[1]) == 0 then
+    return 0
+end
+
 -- 1. Find expired members, sum the amounts they encoded, then DECRBY the
 --    sum key and trim them out of the sorted set. Doing the per-member
 --    accounting up front keeps the sum key in lockstep with the sorted

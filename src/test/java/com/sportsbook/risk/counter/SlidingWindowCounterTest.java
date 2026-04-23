@@ -71,10 +71,19 @@ class SlidingWindowCounterTest {
   }
 
   @Test
-  void emptyReadReturnsZeroWithoutCreatingCounterKeys() {
+  void emptyReadReturnsZeroWithoutCleanupCommandsOrCounterKeys() throws Exception {
     String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+    long getBefore = commandCalls("get");
+    long existsBefore = commandCalls("exists");
+    long rangeBefore = commandCalls("zrangebyscore");
+    long expireBefore = commandCalls("expire");
 
     assertThat(counter.currentSum(key, MINUTE, T0)).isZero();
+
+    assertThat(commandCalls("get")).isEqualTo(getBefore + 1);
+    assertThat(commandCalls("exists")).isEqualTo(existsBefore + 1);
+    assertThat(commandCalls("zrangebyscore")).isEqualTo(rangeBefore);
+    assertThat(commandCalls("expire")).isEqualTo(expireBefore);
     assertThat(template.hasKey(key)).isFalse();
     assertThat(template.hasKey(LimitKeys.sumKey(key))).isFalse();
   }
@@ -84,6 +93,32 @@ class SlidingWindowCounterTest {
     String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
     String sumKey = LimitKeys.sumKey(key);
     template.opsForValue().set(sumKey, Long.toString(STAKE_A));
+
+    assertThat(counter.currentSum(key, MINUTE, T0)).isZero();
+    assertThat(template.hasKey(key)).isFalse();
+    assertThat(template.hasKey(sumKey)).isFalse();
+  }
+
+  @Test
+  void readKeepsExistingWindowWhenItsSumKeyIsMissing() {
+    String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+    String sumKey = LimitKeys.sumKey(key);
+    String member = LimitKeys.encodeMember("bet-1", STAKE_A);
+    template.opsForZSet().add(key, member, T0.toEpochMilli());
+
+    assertThat(counter.currentSum(key, MINUTE, T0)).isZero();
+    assertThat(template.opsForZSet().size(key)).isEqualTo(1L);
+    assertThat(template.opsForZSet().score(key, member)).isEqualTo((double) T0.toEpochMilli());
+    assertThat(template.hasKey(sumKey)).isFalse();
+    assertThat(template.getExpire(key)).isBetween(118L, 120L);
+  }
+
+  @Test
+  void readRemovesExpiredWindowWhenItsSumKeyIsMissing() {
+    String key = LimitKeys.userKey(uniqueUser(), LimitType.STAKE_DAILY);
+    String sumKey = LimitKeys.sumKey(key);
+    String member = LimitKeys.encodeMember("bet-1", STAKE_A);
+    template.opsForZSet().add(key, member, T0.minusSeconds(61).toEpochMilli());
 
     assertThat(counter.currentSum(key, MINUTE, T0)).isZero();
     assertThat(template.hasKey(key)).isFalse();
@@ -131,6 +166,8 @@ class SlidingWindowCounterTest {
     }
 
     assertThat(counter.currentSum(key, MINUTE, T0.plusSeconds(1))).isEqualTo(STAKE_A);
+    assertThat(template.opsForZSet().size(key)).isEqualTo(1L);
+    assertThat(template.opsForValue().get(LimitKeys.sumKey(key))).isEqualTo(Long.toString(STAKE_A));
   }
 
   @Test
@@ -211,6 +248,26 @@ class SlidingWindowCounterTest {
     assertThat(failures.get()).isZero();
     long total = counter.currentSum(key, Duration.ofHours(1), T0);
     assertThat(total).isEqualTo((long) threads * perBet);
+    assertThat(template.opsForZSet().size(key)).isEqualTo((long) threads);
+    assertThat(template.opsForValue().get(LimitKeys.sumKey(key)))
+        .isEqualTo(Long.toString((long) threads * perBet));
+  }
+
+  private static long commandCalls(String command) throws Exception {
+    String prefix = "cmdstat_" + command + ":";
+    String commandStats =
+        REDIS.execInContainer("redis-cli", "--raw", "INFO", "commandstats").getStdout();
+    for (String line : commandStats.split("\\R")) {
+      if (!line.startsWith(prefix)) {
+        continue;
+      }
+      for (String field : line.substring(prefix.length()).split(",")) {
+        if (field.startsWith("calls=")) {
+          return Long.parseLong(field.substring("calls=".length()));
+        }
+      }
+    }
+    return 0L;
   }
 
   private static String uniqueUser() {
