@@ -24,6 +24,11 @@ RUN_ID=${RUN_ID:-$(date '+%Y%m%d-%H%M%S')}
 RESULT_ROOT=${RESULT_ROOT:-"${SCRIPT_DIR}/results/gate/${RUN_ID}"}
 OUTPUT_DIR="${RESULT_ROOT}/${PROFILE}-${STAGE}/raw"
 SERVICE_PID=''
+KAFKA_TOPIC='bet.placed.v1'
+KAFKA_GROUP='risk.bet-placed-consumer'
+KAFKA_PRIMER_TOPIC='risk.gate.coordinator.prime'
+KAFKA_PRIMER_GROUP='risk-gate-coordinator-primer'
+KAFKA_METADATA_ERROR_PATTERN='UNKNOWN_TOPIC_OR_PARTITION|UnknownTopicOrPartition|NOT_COORDINATOR|NotCoordinatorException|UnknownHostException|UnknownHost|Error connecting to node risk-load-kafka:9092'
 
 case "${PROFILE}" in
   baseline|redis-pool-disabled|tomcat-min-spare32|redis-idle16) ;;
@@ -159,6 +164,72 @@ if curl -fsS "${BASE_URL}/actuator/health/readiness" > /dev/null 2>&1; then
   exit 1
 fi
 
+docker exec risk-load-kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --create --if-not-exists \
+  --topic "${KAFKA_TOPIC}" \
+  --partitions 1 \
+  --replication-factor 1 \
+  > "${OUTPUT_DIR}/topic-create.txt" 2>&1
+
+topic_deadline=$((SECONDS + 60))
+until docker exec risk-load-kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --describe --topic "${KAFKA_TOPIC}" \
+  > "${OUTPUT_DIR}/topic-describe.txt" 2>&1 \
+  && grep -Fq "Topic: ${KAFKA_TOPIC}" "${OUTPUT_DIR}/topic-describe.txt" \
+  && grep -Eq 'Leader: [0-9]+' "${OUTPUT_DIR}/topic-describe.txt"; do
+  if (( SECONDS >= topic_deadline )); then
+    echo "Kafka topic ${KAFKA_TOPIC} did not obtain a leader within 60 seconds" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+docker exec risk-load-kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --create --if-not-exists \
+  --topic "${KAFKA_PRIMER_TOPIC}" \
+  --partitions 1 \
+  --replication-factor 1 \
+  > "${OUTPUT_DIR}/coordinator-primer-topic.txt" 2>&1
+
+printf 'ready\n' | docker exec -i risk-load-kafka kafka-console-producer \
+  --bootstrap-server localhost:9092 \
+  --topic "${KAFKA_PRIMER_TOPIC}" \
+  > "${OUTPUT_DIR}/coordinator-primer-produce.txt" 2>&1
+
+docker exec risk-load-kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 \
+  --topic "${KAFKA_PRIMER_TOPIC}" \
+  --group "${KAFKA_PRIMER_GROUP}" \
+  --from-beginning \
+  --max-messages 1 \
+  --timeout-ms 30000 \
+  > "${OUTPUT_DIR}/coordinator-primer-consume.txt" 2>&1
+
+coordinator_deadline=$((SECONDS + 60))
+until docker exec risk-load-kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --describe --topic __consumer_offsets \
+  > "${OUTPUT_DIR}/offsets-topic-describe.txt" 2>&1 \
+  && grep -Fq 'Topic: __consumer_offsets' \
+    "${OUTPUT_DIR}/offsets-topic-describe.txt" \
+  && ! grep -Eq 'Leader: -1|Leader: none' \
+    "${OUTPUT_DIR}/offsets-topic-describe.txt" \
+  && docker exec risk-load-kafka kafka-consumer-groups \
+    --bootstrap-server localhost:9092 \
+    --describe --group "${KAFKA_PRIMER_GROUP}" \
+    > "${OUTPUT_DIR}/coordinator-probe.txt" 2>&1 \
+  && grep -Fq "${KAFKA_PRIMER_TOPIC}" \
+    "${OUTPUT_DIR}/coordinator-probe.txt"; do
+  if (( SECONDS >= coordinator_deadline )); then
+    echo "Kafka consumer-group coordinator did not become ready within 60 seconds" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
 start_service() {
   case "${PROFILE}" in
     baseline)
@@ -237,9 +308,9 @@ assignment_deadline=$((SECONDS + 60))
 until docker exec risk-load-kafka kafka-consumer-groups \
   --bootstrap-server localhost:9092 \
   --describe \
-  --group risk.bet-placed-consumer \
+  --group "${KAFKA_GROUP}" \
   > "${OUTPUT_DIR}/consumer-group.txt" 2>&1 \
-  && grep -Fq 'bet.placed.v1' "${OUTPUT_DIR}/consumer-group.txt"; do
+  && grep -Fq "${KAFKA_TOPIC}" "${OUTPUT_DIR}/consumer-group.txt"; do
   if (( SECONDS >= assignment_deadline )); then
     echo "risk-service consumer did not receive a bet.placed.v1 assignment" >&2
     exit 1
@@ -247,9 +318,10 @@ until docker exec risk-load-kafka kafka-consumer-groups \
   sleep 1
 done
 
-if grep -Eiq 'UnknownHostException|UnknownHost|Error connecting to node risk-load-kafka:9092' \
-  "${OUTPUT_DIR}/service.log"; then
-  echo "Kafka listener metadata resolved to an unreachable internal hostname" >&2
+if grep -Eiq "${KAFKA_METADATA_ERROR_PATTERN}" "${OUTPUT_DIR}/service.log"; then
+  grep -Ein "${KAFKA_METADATA_ERROR_PATTERN}" "${OUTPUT_DIR}/service.log" \
+    > "${OUTPUT_DIR}/kafka-metadata-errors.txt" || true
+  echo "Kafka metadata or coordinator errors appeared before measurement" >&2
   exit 1
 fi
 
@@ -305,8 +377,9 @@ for ((run = 1; run <= RUN_COUNT; run++)); do
   fi
 done
 
-if grep -Eiq 'UnknownHostException|UnknownHost|Error connecting to node risk-load-kafka:9092' \
-  "${OUTPUT_DIR}/service.log"; then
+if grep -Eiq "${KAFKA_METADATA_ERROR_PATTERN}" "${OUTPUT_DIR}/service.log"; then
+  grep -Ein "${KAFKA_METADATA_ERROR_PATTERN}" "${OUTPUT_DIR}/service.log" \
+    > "${OUTPUT_DIR}/kafka-metadata-errors.txt" || true
   echo "Kafka metadata errors appeared during the measured gate" >&2
   exit 1
 fi

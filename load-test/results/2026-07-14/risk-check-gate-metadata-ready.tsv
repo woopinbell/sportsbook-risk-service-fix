@@ -1,0 +1,15 @@
+variant	stage	run	status	p50_ms	p95_ms	p99_ms	error_rate	checks_rate	dropped_iterations	metadata_errors
+baseline	final	1	FAIL	2.355	13.7532	131.95851	0	1	731	0
+baseline	final	2	FAIL	3.498	12.101	53.98673	0	1	13	0
+baseline	final	3	FAIL	5.022	20.7596	70.80803	0	1	0	0
+baseline	final	4	FAIL	3.796	19.8807	112.59164	0	1	17	0
+baseline	final	5	FAIL	4.477	23.1075	104.339	0	1	521	0
+redis-pool-disabled	screen	1	FAIL	2.596	11.131	37.7	0	1	0	0
+redis-pool-disabled	screen	2	FAIL	3.017	13.5376	147.76448	0	1	204	0
+redis-pool-disabled	screen	3	FAIL	3.171	18.95535	68.43644	0	1	197	0
+tomcat-min-spare32	screen	1	FAIL	5.432	44.8747	117.42829	0	1	16	0
+tomcat-min-spare32	screen	2	FAIL	3.714	18.06005	193.60891	0	1	462	0
+tomcat-min-spare32	screen	3	FAIL	2.485	8.852	71.95284	0	1	476	0
+redis-idle16	screen	1	FAIL	5.74	87.6707	238.70816	0	1	429	0
+redis-idle16	screen	2	FAIL	5.945	146.12475	431.8159	0	1	1215	0
+redis-idle16	screen	3	FAIL	6.871	84.909	215.8598	0	1	310	0
