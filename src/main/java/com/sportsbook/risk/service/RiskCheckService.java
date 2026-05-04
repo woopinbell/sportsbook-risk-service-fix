@@ -1,9 +1,7 @@
 package com.sportsbook.risk.service;
 
 import com.sportsbook.protocol.value.Currency;
-import com.sportsbook.risk.counter.LimitKeys;
 import com.sportsbook.risk.counter.LimitType;
-import com.sportsbook.risk.counter.SlidingWindowCounter;
 import com.sportsbook.risk.event.RiskEventPublisher;
 import com.sportsbook.risk.limit.LimitResolver;
 import com.sportsbook.risk.pattern.PatternContext;
@@ -11,6 +9,9 @@ import com.sportsbook.risk.pattern.PatternMatch;
 import com.sportsbook.risk.pattern.RuleEngine;
 import com.sportsbook.risk.policy.PatternAction;
 import com.sportsbook.risk.policy.RiskLimitProperties;
+import com.sportsbook.risk.snapshot.LimitSnapshot;
+import com.sportsbook.risk.snapshot.PatternSnapshot;
+import com.sportsbook.risk.snapshot.RiskSnapshotReader;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.util.List;
@@ -19,16 +20,16 @@ import org.springframework.stereotype.Service;
 
 /**
  * Synchronous risk evaluation for a candidate bet. Executes in the betting-service critical path,
- * so the implementation makes a fixed bounded number of Redis round-trips (one per sliding-window
- * limit, one HGET per overridden limit and zero per yaml-default limit, then the pattern rule
- * queries) and returns at the first limit breach.
+ * so an approved request uses two Redis round-trips: one atomic limit/override snapshot and one
+ * atomic pattern-fact snapshot. Java still returns at the first limit breach in the established
+ * decision order.
  *
  * <p>Order matters and is intentionally simple-to-expensive:
  *
  * <ol>
  *   <li>{@code SINGLE_BET_MAX} — pure local comparison against the yaml threshold.
- *   <li>{@code STAKE_DAILY}, {@code STAKE_WEEKLY}, {@code STAKE_MONTHLY} — one Redis Lua peek each
- *       via {@link SlidingWindowCounter#currentSum}, plus a resolver lookup.
+ *   <li>{@code STAKE_DAILY}, {@code STAKE_WEEKLY}, {@code STAKE_MONTHLY} — values from the first
+ *       atomic snapshot, plus a pure resolver lookup.
  *   <li>{@code SELECTIONS_PER_MINUTE} — same shape, count-based.
  *   <li>Pattern rules — exercised by {@link RuleEngine}; a BLOCK match rejects the bet, SUSPECT /
  *       REVIEW matches surface in the response but do not reject.
@@ -50,7 +51,7 @@ public class RiskCheckService {
 
   private final RiskLimitProperties policy;
   private final LimitResolver limitResolver;
-  private final SlidingWindowCounter counter;
+  private final RiskSnapshotReader snapshots;
   private final RuleEngine ruleEngine;
   private final RiskEventPublisher publisher;
   private final MeterRegistry meters;
@@ -59,13 +60,13 @@ public class RiskCheckService {
   public RiskCheckService(
       RiskLimitProperties policy,
       LimitResolver limitResolver,
-      SlidingWindowCounter counter,
+      RiskSnapshotReader snapshots,
       RuleEngine ruleEngine,
       RiskEventPublisher publisher,
       MeterRegistry meters) {
     this.policy = policy;
     this.limitResolver = limitResolver;
-    this.counter = counter;
+    this.snapshots = snapshots;
     this.ruleEngine = ruleEngine;
     this.publisher = publisher;
     this.meters = meters;
@@ -96,10 +97,10 @@ public class RiskCheckService {
               PatternAction.BLOCK.name()));
     }
 
+    LimitSnapshot limits = snapshots.readLimits(cmd.userId(), currency, cmd.now());
     for (LimitType type : STAKE_LIMITS) {
-      String key = LimitKeys.userKey(cmd.userId(), type);
-      long current = counter.currentSum(key, type.window(), cmd.now());
-      long limit = limitResolver.resolveUser(cmd.userId(), type, currency);
+      long current = limits.current(type);
+      long limit = limitResolver.resolveUserFromSnapshot(type, currency, limits.override(type));
       if (current + stake > limit) {
         return reject(
             cmd,
@@ -114,11 +115,12 @@ public class RiskCheckService {
     }
 
     int requestedSelections = cmd.selectionIds().size();
-    String selKey = LimitKeys.userKey(cmd.userId(), LimitType.SELECTIONS_PER_MINUTE);
-    long selCurrent =
-        counter.currentSum(selKey, LimitType.SELECTIONS_PER_MINUTE.window(), cmd.now());
+    long selCurrent = limits.current(LimitType.SELECTIONS_PER_MINUTE);
     long selLimit =
-        limitResolver.resolveUser(cmd.userId(), LimitType.SELECTIONS_PER_MINUTE, currency);
+        limitResolver.resolveUserFromSnapshot(
+            LimitType.SELECTIONS_PER_MINUTE,
+            currency,
+            limits.override(LimitType.SELECTIONS_PER_MINUTE));
     if (selCurrent + requestedSelections > selLimit) {
       return reject(
           cmd,
@@ -133,7 +135,8 @@ public class RiskCheckService {
 
     PatternContext ctx =
         new PatternContext(cmd.userId(), cmd.betId(), cmd.stake(), cmd.selectionIds(), cmd.now());
-    List<PatternMatch> matches = ruleEngine.evaluate(ctx);
+    PatternSnapshot patterns = snapshots.readPatterns(ctx);
+    List<PatternMatch> matches = ruleEngine.evaluate(ctx, patterns);
     for (PatternMatch m : matches) {
       meters
           .counter("risk_pattern_flags_total", "rule", m.ruleName(), "action", m.action().name())

@@ -36,6 +36,12 @@ public class LimitResolver {
         .orElseGet(() -> policyDefault(type, currency));
   }
 
+  /** Resolves a limit from an override already captured in the request's Redis snapshot. */
+  public long resolveUserFromSnapshot(
+      LimitType type, Currency currency, Optional<Long> capturedOverride) {
+    return capturedOverride.orElseGet(() -> policyDefault(type, currency));
+  }
+
   public Optional<Long> resolveMarket(String marketId, LimitType type, Currency currency) {
     return overrides.findMarketOverride(marketId, type, currency);
   }

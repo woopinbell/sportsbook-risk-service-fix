@@ -2,9 +2,10 @@ package com.sportsbook.risk.pattern.rule;
 
 import com.sportsbook.risk.pattern.PatternContext;
 import com.sportsbook.risk.pattern.PatternMatch;
-import com.sportsbook.risk.pattern.PatternRule;
+import com.sportsbook.risk.pattern.SnapshotPatternRule;
 import com.sportsbook.risk.pattern.UserBetHistory;
 import com.sportsbook.risk.policy.RiskPatternProperties;
+import com.sportsbook.risk.snapshot.PatternSnapshot;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -21,7 +22,7 @@ import org.springframework.stereotype.Component;
  * has no comparable baseline yet and the rule would otherwise fire on every bet.
  */
 @Component
-public class SuddenStakeIncreaseRule implements PatternRule {
+public class SuddenStakeIncreaseRule implements SnapshotPatternRule {
 
   static final String NAME = "sudden-stake-increase";
 
@@ -39,6 +40,18 @@ public class SuddenStakeIncreaseRule implements PatternRule {
       return Optional.empty();
     }
     List<Long> recent = history.recentStakeAmounts(context.userId(), cfg.lookbackBets());
+    return evaluate(context, recent);
+  }
+
+  @Override
+  public Optional<PatternMatch> evaluate(PatternContext context, PatternSnapshot snapshot) {
+    if (!cfg.enabled()) {
+      return Optional.empty();
+    }
+    return evaluate(context, snapshot.recentStakeAmounts());
+  }
+
+  private Optional<PatternMatch> evaluate(PatternContext context, List<Long> recent) {
     if (recent.size() < cfg.lookbackBets()) {
       return Optional.empty();
     }

@@ -62,6 +62,17 @@ class LimitResolverTest {
   }
 
   @Test
+  void capturedOverrideUsesTheSamePrecedenceWithoutAnotherStoreRead() {
+    assertThat(
+            resolver.resolveUserFromSnapshot(
+                LimitType.STAKE_DAILY, Currency.KRW, Optional.of(OVERRIDE_DAILY_KRW)))
+        .isEqualTo(OVERRIDE_DAILY_KRW);
+    assertThat(
+            resolver.resolveUserFromSnapshot(LimitType.STAKE_DAILY, Currency.KRW, Optional.empty()))
+        .isEqualTo(POLICY_DAILY_KRW);
+  }
+
+  @Test
   void selectionsPerMinuteIgnoresCurrency() {
     when(overrides.findUserOverride(USER_ID, LimitType.SELECTIONS_PER_MINUTE, Currency.KRW))
         .thenReturn(Optional.empty());

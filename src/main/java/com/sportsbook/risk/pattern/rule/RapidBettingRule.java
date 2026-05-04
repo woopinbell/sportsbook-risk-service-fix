@@ -2,9 +2,10 @@ package com.sportsbook.risk.pattern.rule;
 
 import com.sportsbook.risk.pattern.PatternContext;
 import com.sportsbook.risk.pattern.PatternMatch;
-import com.sportsbook.risk.pattern.PatternRule;
+import com.sportsbook.risk.pattern.SnapshotPatternRule;
 import com.sportsbook.risk.pattern.UserBetHistory;
 import com.sportsbook.risk.policy.RiskPatternProperties;
+import com.sportsbook.risk.snapshot.PatternSnapshot;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Component;
  * configured cap, so a {@code maxBets=30} setting still triggers on the 30th submission.
  */
 @Component
-public class RapidBettingRule implements PatternRule {
+public class RapidBettingRule implements SnapshotPatternRule {
 
   static final String NAME = "rapid-betting";
 
@@ -35,6 +36,18 @@ public class RapidBettingRule implements PatternRule {
     long recent =
         history.countBetsBetween(
             context.userId(), context.now().minusSeconds(cfg.windowSeconds()), context.now());
+    return evaluate(context, recent);
+  }
+
+  @Override
+  public Optional<PatternMatch> evaluate(PatternContext context, PatternSnapshot snapshot) {
+    if (!cfg.enabled()) {
+      return Optional.empty();
+    }
+    return evaluate(context, snapshot.recentBetCount());
+  }
+
+  private Optional<PatternMatch> evaluate(PatternContext context, long recent) {
     long withCandidate = recent + 1;
     if (withCandidate < cfg.maxBets()) {
       return Optional.empty();

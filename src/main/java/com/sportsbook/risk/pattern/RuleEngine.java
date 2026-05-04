@@ -1,5 +1,6 @@
 package com.sportsbook.risk.pattern;
 
+import com.sportsbook.risk.snapshot.PatternSnapshot;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -33,5 +34,25 @@ public class RuleEngine {
         .filter(Optional::isPresent)
         .map(Optional::get)
         .toList();
+  }
+
+  /** Evaluates snapshot-aware production rules without issuing any further Redis reads. */
+  public List<PatternMatch> evaluate(PatternContext context, PatternSnapshot snapshot) {
+    Objects.requireNonNull(context, "context");
+    Objects.requireNonNull(snapshot, "snapshot");
+    return rules.stream()
+        .map(rule -> evaluateSnapshotRule(rule, context, snapshot))
+        .filter(Optional::isPresent)
+        .map(Optional::get)
+        .toList();
+  }
+
+  private static Optional<PatternMatch> evaluateSnapshotRule(
+      PatternRule rule, PatternContext context, PatternSnapshot snapshot) {
+    if (!(rule instanceof SnapshotPatternRule snapshotRule)) {
+      throw new IllegalStateException(
+          "Pattern rule " + rule.getClass().getName() + " does not support snapshot evaluation");
+    }
+    return snapshotRule.evaluate(context, snapshot);
   }
 }

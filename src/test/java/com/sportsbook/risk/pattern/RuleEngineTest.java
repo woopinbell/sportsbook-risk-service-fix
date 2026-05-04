@@ -1,11 +1,14 @@
 package com.sportsbook.risk.pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sportsbook.protocol.value.Money;
 import com.sportsbook.risk.policy.PatternAction;
+import com.sportsbook.risk.snapshot.PatternSnapshot;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +62,24 @@ class RuleEngineTest {
         new RuleEngine(List.of(constant(Optional.of(block)), constant(Optional.of(suspect))));
 
     assertThat(engine.evaluate(CTX)).containsExactly(block, suspect);
+  }
+
+  @Test
+  void directEvaluationStillSupportsPlainPatternRules() {
+    PatternMatch match = new PatternMatch("plain", PatternAction.SUSPECT, "direct only");
+    RuleEngine engine = new RuleEngine(List.of(constant(Optional.of(match))));
+
+    assertThat(engine.evaluate(CTX)).containsExactly(match);
+  }
+
+  @Test
+  void snapshotEvaluationFailsClosedForRulesThatCouldIssueAdditionalReads() {
+    RuleEngine engine = new RuleEngine(List.of(constant(Optional.empty())));
+    PatternSnapshot snapshot = PatternSnapshot.successful(0L, List.of(), Map.of("s-1", 0L));
+
+    assertThatThrownBy(() -> engine.evaluate(CTX, snapshot))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("does not support snapshot evaluation");
   }
 
   private static PatternRule constant(Optional<PatternMatch> verdict) {
