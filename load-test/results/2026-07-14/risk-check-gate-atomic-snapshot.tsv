@@ -1,0 +1,2 @@
+variant	stage	run	status	http_reqs	p50_ms	p95_ms	p99_ms	error_rate	checks_rate	dropped_iterations	server_evalsha_per_request	client_evalsha_per_request	client_other_commands	kafka_assignment	metadata_errors
+atomic-snapshot	screen	1	FAIL	59993	0.802	14.079	64.654	0	1	8	2	2	0	Stable	0
