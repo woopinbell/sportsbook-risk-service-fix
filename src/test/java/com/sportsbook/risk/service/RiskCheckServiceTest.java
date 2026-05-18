@@ -2,7 +2,6 @@ package com.sportsbook.risk.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.inOrder;
@@ -23,6 +22,7 @@ import com.sportsbook.risk.policy.PatternAction;
 import com.sportsbook.risk.policy.RiskLimitProperties;
 import com.sportsbook.risk.snapshot.LimitSnapshot;
 import com.sportsbook.risk.snapshot.PatternSnapshot;
+import com.sportsbook.risk.snapshot.RiskSnapshot;
 import com.sportsbook.risk.snapshot.RiskSnapshotReader;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
@@ -48,6 +48,7 @@ class RiskCheckServiceTest {
 
   @Mock private LimitResolver limitResolver;
   @Mock private RiskSnapshotReader snapshots;
+  @Mock private RiskSnapshot riskSnapshot;
   @Mock private LimitSnapshot limitSnapshot;
   @Mock private PatternSnapshot patternSnapshot;
   @Mock private RuleEngine ruleEngine;
@@ -83,8 +84,7 @@ class RiskCheckServiceTest {
     assertThat(outcome.approved()).isTrue();
     assertThat(outcome.rejection()).isEmpty();
     assertThat(outcome.patternsFlagged()).isEmpty();
-    verify(snapshots).readLimits(USER, Currency.KRW, NOW);
-    verify(snapshots).readPatterns(any(PatternContext.class));
+    verify(snapshots).read(eq(USER), eq(Currency.KRW), any(PatternContext.class));
   }
 
   @Test
@@ -101,8 +101,8 @@ class RiskCheckServiceTest {
     assertThat(rejection.requested()).isEqualTo(600_000L);
     assertThat(rejection.action()).isEqualTo(PatternAction.BLOCK.name());
     verify(publisher).publishLimitViolated(USER, rejection, NOW);
-    verify(snapshots, never()).readLimits(anyString(), any(Currency.class), any(Instant.class));
-    verify(snapshots, never()).readPatterns(any(PatternContext.class));
+    verify(snapshots, never())
+        .read(any(String.class), any(Currency.class), any(PatternContext.class));
   }
 
   @Test
@@ -129,7 +129,7 @@ class RiskCheckServiceTest {
     assertThat(rej.current()).isEqualTo(950_000L);
     assertThat(rej.limit()).isEqualTo(1_000_000L);
     assertThat(rej.requested()).isEqualTo(100_000L);
-    verify(snapshots, never()).readPatterns(any(PatternContext.class));
+    verify(ruleEngine, never()).evaluate(any(PatternContext.class), any(PatternSnapshot.class));
     verify(publisher).publishLimitViolated(eq(USER), eq(rej), eq(NOW));
   }
 
@@ -156,7 +156,7 @@ class RiskCheckServiceTest {
     assertThat(rejection.requested()).isEqualTo(2L);
     assertThat(rejection.action()).isEqualTo(PatternAction.BLOCK.name());
     verify(publisher).publishLimitViolated(USER, rejection, NOW);
-    verify(snapshots, never()).readPatterns(any(PatternContext.class));
+    verify(ruleEngine, never()).evaluate(any(PatternContext.class), any(PatternSnapshot.class));
   }
 
   @Test
@@ -174,7 +174,7 @@ class RiskCheckServiceTest {
     assertThat(rejection.limit()).isEqualTo(5_000_000L);
     assertThat(rejection.requested()).isEqualTo(200_000L);
     verify(publisher).publishLimitViolated(USER, rejection, NOW);
-    verify(snapshots, never()).readPatterns(any(PatternContext.class));
+    verify(ruleEngine, never()).evaluate(any(PatternContext.class), any(PatternSnapshot.class));
   }
 
   @Test
@@ -193,7 +193,7 @@ class RiskCheckServiceTest {
     assertThat(rejection.limit()).isEqualTo(20_000_000L);
     assertThat(rejection.requested()).isEqualTo(200_000L);
     verify(publisher).publishLimitViolated(USER, rejection, NOW);
-    verify(snapshots, never()).readPatterns(any(PatternContext.class));
+    verify(ruleEngine, never()).evaluate(any(PatternContext.class), any(PatternSnapshot.class));
   }
 
   @Test
@@ -256,9 +256,11 @@ class RiskCheckServiceTest {
   }
 
   private void primeSnapshot() {
-    when(snapshots.readLimits(USER, Currency.KRW, NOW)).thenReturn(limitSnapshot);
+    when(snapshots.read(eq(USER), eq(Currency.KRW), any(PatternContext.class)))
+        .thenReturn(riskSnapshot);
+    when(riskSnapshot.limits()).thenReturn(limitSnapshot);
+    when(riskSnapshot.patterns()).thenReturn(patternSnapshot);
     when(limitSnapshot.override(any(LimitType.class))).thenReturn(Optional.empty());
-    when(snapshots.readPatterns(any(PatternContext.class))).thenReturn(patternSnapshot);
     when(ruleEngine.evaluate(any(PatternContext.class), same(patternSnapshot)))
         .thenReturn(List.of());
   }

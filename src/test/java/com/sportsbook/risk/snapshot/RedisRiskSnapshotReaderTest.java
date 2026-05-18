@@ -70,8 +70,10 @@ class RedisRiskSnapshotReaderTest {
 
   @Test
   void emptySnapshotsReturnZerosWithoutCreatingKeys() {
-    LimitSnapshot limits = reader.readLimits(USER, Currency.KRW, NOW);
-    PatternSnapshot patterns = reader.readPatterns(context(List.of("s-1")));
+    PatternContext context = context(List.of("s-1"));
+    RiskSnapshot snapshot = reader.read(USER, Currency.KRW, context);
+    LimitSnapshot limits = snapshot.limits();
+    PatternSnapshot patterns = snapshot.patterns();
 
     for (LimitType type : LimitType.values()) {
       assertThat(limits.current(type)).isZero();
@@ -136,16 +138,30 @@ class RedisRiskSnapshotReaderTest {
   }
 
   @Test
-  void approvedReadPathUsesExactlyTwoSteadyStateEvalshaCalls() throws Exception {
+  void approvedReadPathUsesExactlyOneSteadyStateEvalshaCall() throws Exception {
     PatternContext context = context(List.of("s-1"));
-    reader.readLimits(USER, Currency.KRW, NOW);
-    reader.readPatterns(context);
+    reader.read(USER, Currency.KRW, context);
     long before = commandCalls("evalsha");
 
-    reader.readLimits(USER, Currency.KRW, NOW);
-    reader.readPatterns(context);
+    reader.read(USER, Currency.KRW, context);
 
-    assertThat(commandCalls("evalsha")).isEqualTo(before + 2L);
+    assertThat(commandCalls("evalsha")).isEqualTo(before + 1L);
+  }
+
+  @Test
+  void combinedSnapshotPreservesEveryExistingLimitAndPatternFact() {
+    writeState(10L, 100L);
+    writePatternState();
+    PatternContext context = context(List.of("s-1", "s-2"));
+
+    RiskSnapshot snapshot = reader.read(USER, Currency.KRW, context);
+
+    for (LimitType type : LimitType.values()) {
+      assertThat(snapshot.limits().current(type)).isEqualTo(10L);
+      assertThat(snapshot.limits().override(type)).contains(100L);
+    }
+    assertThat(observe(snapshot.patterns()))
+        .isEqualTo(new PatternObservation(1L, List.of(1_234L), 1L, 1L));
   }
 
   @Test
@@ -155,8 +171,9 @@ class RedisRiskSnapshotReaderTest {
     String bets = "history:user:" + USER + ":bets";
     template.opsForValue().set(bets, "not-a-zset");
 
-    LimitSnapshot limits = reader.readLimits(USER, Currency.KRW, NOW);
-    PatternSnapshot patterns = reader.readPatterns(context(List.of("s-1")));
+    RiskSnapshot snapshot = reader.read(USER, Currency.KRW, context(List.of("s-1")));
+    LimitSnapshot limits = snapshot.limits();
+    PatternSnapshot patterns = snapshot.patterns();
 
     assertThat(limits.current(LimitType.STAKE_DAILY)).isZero();
     assertThat(limits.override(LimitType.STAKE_DAILY)).isEmpty();

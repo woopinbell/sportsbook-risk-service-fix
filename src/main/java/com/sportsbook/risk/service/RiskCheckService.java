@@ -11,6 +11,7 @@ import com.sportsbook.risk.policy.PatternAction;
 import com.sportsbook.risk.policy.RiskLimitProperties;
 import com.sportsbook.risk.snapshot.LimitSnapshot;
 import com.sportsbook.risk.snapshot.PatternSnapshot;
+import com.sportsbook.risk.snapshot.RiskSnapshot;
 import com.sportsbook.risk.snapshot.RiskSnapshotReader;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -20,9 +21,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * Synchronous risk evaluation for a candidate bet. Executes in the betting-service critical path,
- * so an approved request uses two Redis round-trips: one atomic limit/override snapshot and one
- * atomic pattern-fact snapshot. Java still returns at the first limit breach in the established
- * decision order.
+ * so an approved request uses one Redis round-trip for an atomic limit, override, and pattern-fact
+ * snapshot. Java still returns at the first limit breach in the established decision order.
  *
  * <p>Order matters and is intentionally simple-to-expensive:
  *
@@ -97,7 +97,10 @@ public class RiskCheckService {
               PatternAction.BLOCK.name()));
     }
 
-    LimitSnapshot limits = snapshots.readLimits(cmd.userId(), currency, cmd.now());
+    PatternContext ctx =
+        new PatternContext(cmd.userId(), cmd.betId(), cmd.stake(), cmd.selectionIds(), cmd.now());
+    RiskSnapshot snapshot = snapshots.read(cmd.userId(), currency, ctx);
+    LimitSnapshot limits = snapshot.limits();
     for (LimitType type : STAKE_LIMITS) {
       long current = limits.current(type);
       long limit = limitResolver.resolveUserFromSnapshot(type, currency, limits.override(type));
@@ -133,9 +136,7 @@ public class RiskCheckService {
               PatternAction.BLOCK.name()));
     }
 
-    PatternContext ctx =
-        new PatternContext(cmd.userId(), cmd.betId(), cmd.stake(), cmd.selectionIds(), cmd.now());
-    PatternSnapshot patterns = snapshots.readPatterns(ctx);
+    PatternSnapshot patterns = snapshot.patterns();
     List<PatternMatch> matches = ruleEngine.evaluate(ctx, patterns);
     for (PatternMatch m : matches) {
       meters

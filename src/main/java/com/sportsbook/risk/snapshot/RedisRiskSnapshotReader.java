@@ -23,7 +23,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
 
-/** Standalone-Redis implementation that obtains each risk fact group through one Lua script. */
+/** Standalone-Redis implementation that obtains all risk facts through one Lua script. */
 @Component
 public class RedisRiskSnapshotReader implements RiskSnapshotReader {
 
@@ -37,6 +37,7 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
   private final StringRedisTemplate redis;
   private final RiskPatternProperties patterns;
   private final ObjectMapper mapper;
+  private final RedisScript<String> snapshotScript;
   private final RedisScript<String> limitScript;
   private final RedisScript<String> patternScript;
 
@@ -45,10 +46,46 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
     this.redis = redis;
     this.patterns = patterns;
     this.mapper = mapper;
+    this.snapshotScript = new DefaultRedisScript<>(load("scripts/risk-snapshot.lua"), String.class);
     this.limitScript =
         new DefaultRedisScript<>(load("scripts/risk-limit-snapshot.lua"), String.class);
     this.patternScript =
         new DefaultRedisScript<>(load("scripts/risk-pattern-snapshot.lua"), String.class);
+  }
+
+  @Override
+  public RiskSnapshot read(String userId, Currency currency, PatternContext context) {
+    List<String> keys = new ArrayList<>();
+    List<String> args = new ArrayList<>();
+    args.add(Long.toString(context.now().toEpochMilli()));
+    for (LimitType type : LimitType.values()) {
+      keys.addAll(LimitKeys.userKeyPair(userId, type));
+      args.add(Long.toString(type.window().toMillis()));
+      args.add(Long.toString(ttlSecondsFor(type.window())));
+    }
+    keys.add(USER_OVERRIDE_PREFIX + userId);
+    for (LimitType type : LimitType.values()) {
+      args.add(overrideField(type, currency));
+    }
+
+    RiskPatternProperties.RapidBetting rapid = patterns.rapidBetting();
+    RiskPatternProperties.SuddenStakeIncrease sudden = patterns.suddenStakeIncrease();
+    RiskPatternProperties.RepeatedSameSelection repeated = patterns.repeatedSameSelection();
+    keys.add(HISTORY_PREFIX + context.userId() + HISTORY_BETS_SUFFIX);
+    for (String selectionId : context.selectionIds()) {
+      keys.add(HISTORY_PREFIX + context.userId() + HISTORY_SELECTION_INFIX + selectionId);
+    }
+    args.add(enabled(rapid.enabled()));
+    args.add(Long.toString(Duration.ofSeconds(rapid.windowSeconds()).toMillis()));
+    args.add(enabled(sudden.enabled()));
+    args.add(Integer.toString(sudden.lookbackBets()));
+    args.add(enabled(repeated.enabled()));
+    args.add(Long.toString(Duration.ofHours(repeated.windowHours()).toMillis()));
+
+    RiskWire wire = readWire(snapshotScript, keys, args, RiskWire.class);
+    return new RiskSnapshot(
+        toLimitSnapshot(userId, currency, wire.limits()),
+        toPatternSnapshot(context, wire.patterns()));
   }
 
   @Override
@@ -67,6 +104,10 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
     }
 
     LimitWire wire = readWire(limitScript, keys, args, LimitWire.class);
+    return toLimitSnapshot(userId, currency, wire);
+  }
+
+  private LimitSnapshot toLimitSnapshot(String userId, Currency currency, LimitWire wire) {
     Map<LimitType, SnapshotSlot<Long>> counters = new EnumMap<>(LimitType.class);
     Map<LimitType, SnapshotSlot<String>> overrides = new EnumMap<>(LimitType.class);
     for (LimitType type : LimitType.values()) {
@@ -98,6 +139,10 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
             Long.toString(Duration.ofHours(repeated.windowHours()).toMillis()));
 
     PatternWire wire = readWire(patternScript, keys, args, PatternWire.class);
+    return toPatternSnapshot(context, wire);
+  }
+
+  private PatternSnapshot toPatternSnapshot(PatternContext context, PatternWire wire) {
     Map<String, SnapshotSlot<Long>> selections = new LinkedHashMap<>();
     for (int index = 0; index < context.selectionIds().size(); index++) {
       String selectionId = context.selectionIds().get(index);
@@ -197,4 +242,6 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
   private record LimitWire(Map<String, WireSlot> counters, Map<String, WireSlot> overrides) {}
 
   private record PatternWire(WireSlot rapid, WireSlot stakes, Map<String, WireSlot> selections) {}
+
+  private record RiskWire(LimitWire limits, PatternWire patterns) {}
 }

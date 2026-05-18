@@ -4,8 +4,10 @@ import com.sportsbook.protocol.value.Currency;
 import com.sportsbook.risk.pattern.PatternContext;
 import java.time.Instant;
 
-/** Reads the two point-in-time Redis snapshots used by one synchronous risk check. */
+/** Reads the point-in-time Redis facts used by one synchronous risk check. */
 public interface RiskSnapshotReader {
+
+  RiskSnapshot read(String userId, Currency currency, PatternContext context);
 
   LimitSnapshot readLimits(String userId, Currency currency, Instant now);
 
