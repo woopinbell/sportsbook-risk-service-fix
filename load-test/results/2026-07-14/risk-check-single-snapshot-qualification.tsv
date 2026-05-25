@@ -1,0 +1,2 @@
+candidate	stage	run	requests	p50_ms	p95_ms	p99_ms	http_errors	checks_percent	dropped_iterations	result	interpretation
+eebe87c0b8c9c889c1d99ef13f68c84724706cc7	screen	1	58971	0.802	13.060	268.450	0	100	1030	FAIL	environment qualification only; remaining runs interrupted

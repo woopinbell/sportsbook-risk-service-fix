@@ -32,7 +32,7 @@ KAFKA_GROUP='risk.bet-placed-consumer'
 KAFKA_PRIMER_TOPIC='risk.gate.coordinator.prime'
 KAFKA_PRIMER_GROUP='risk-gate-coordinator-primer'
 KAFKA_METADATA_ERROR_PATTERN='UNKNOWN_TOPIC_OR_PARTITION|UnknownTopicOrPartition|NOT_COORDINATOR|NotCoordinatorException|UnknownHostException|UnknownHost|Error connecting to node (risk-load-kafka:9092|localhost:9094)'
-EXPECTED_EVALSHA_PER_REQUEST=2
+EXPECTED_EVALSHA_PER_REQUEST=1
 APPLICATION_COMMAND_METRIC='lettuce_command_completion_seconds_count'
 EXPECTED_SOURCE_COMMIT=${EXPECTED_SOURCE_COMMIT:-}
 EXPECTED_SOURCE_TREE=${EXPECTED_SOURCE_TREE:-}
@@ -388,10 +388,8 @@ record_artifact_binding() {
     echo "Measured jar contains no snapshot implementation artifacts" >&2
     return 1
   fi
-  if ! grep -Fxq 'BOOT-INF/classes/scripts/risk-limit-snapshot.lua' \
+  if ! grep -Fxq 'BOOT-INF/classes/scripts/risk-snapshot.lua' \
     "${OUTPUT_DIR}/snapshot-artifact-entries.txt" \
-    || ! grep -Fxq 'BOOT-INF/classes/scripts/risk-pattern-snapshot.lua' \
-      "${OUTPUT_DIR}/snapshot-artifact-entries.txt" \
     || ! grep -Fxq \
       'BOOT-INF/classes/com/sportsbook/risk/snapshot/RedisRiskSnapshotReader.class' \
       "${OUTPUT_DIR}/snapshot-artifact-entries.txt" \
@@ -399,7 +397,7 @@ record_artifact_binding() {
       "${OUTPUT_DIR}/snapshot-artifact-entries.txt" \
     || ! grep -Fxq 'BOOT-INF/classes/com/sportsbook/risk/pattern/RuleEngine.class' \
       "${OUTPUT_DIR}/snapshot-artifact-entries.txt"; then
-    echo "Measured jar is not the two-stage risk snapshot candidate" >&2
+    echo "Measured jar is not the single-snapshot risk candidate" >&2
     return 1
   fi
 
@@ -412,7 +410,7 @@ record_artifact_binding() {
 
   printf 'source_path\tsource_sha256\tjar_entry\tjar_sha256\tstatus\n' \
     > "${OUTPUT_DIR}/snapshot-script-binding.tsv"
-  for script in risk-limit-snapshot.lua risk-pattern-snapshot.lua; do
+  for script in risk-snapshot.lua; do
     source_script_sha=$(shasum -a 256 \
       "${REPO_ROOT}/src/main/resources/scripts/${script}" | awk '{print $1}')
     jar_script_sha=$(unzip -p "${JAR_PATH}" "BOOT-INF/classes/scripts/${script}" \
@@ -777,11 +775,11 @@ if [[ ! -f "${SNAPSHOT_TEST_REPORT}" || ! -f "${SERVICE_TEST_REPORT}" ]]; then
   echo "Maven verify did not produce the required snapshot test reports" >&2
   exit 1
 fi
-if ! grep -Fq 'name="approvedReadPathUsesExactlyTwoSteadyStateEvalshaCalls"' \
+if ! grep -Fq 'name="approvedReadPathUsesExactlyOneSteadyStateEvalshaCall"' \
   "${SNAPSHOT_TEST_REPORT}" \
   || ! grep -Fq 'name="approvesWhenAllLimitsClearAndNoRulesFire"' \
     "${SERVICE_TEST_REPORT}"; then
-  echo "Maven verify did not execute the approved two-snapshot request fixtures" >&2
+  echo "Maven verify did not execute the approved single-snapshot request fixture" >&2
   exit 1
 fi
 cp "${SNAPSHOT_TEST_REPORT}" "${OUTPUT_DIR}/snapshot-reader-test-report.xml"
@@ -1082,7 +1080,7 @@ if ! verify_snapshot_contract \
   "${OUTPUT_DIR}/warmup-after-redis-commandstats.txt" \
   "${OUTPUT_DIR}/warmup-before-application-prometheus.txt" \
   "${OUTPUT_DIR}/warmup-after-application-prometheus.txt"; then
-  echo "Warm-up did not execute exactly two client/server EVALSHA commands per request" >&2
+  echo "Warm-up did not execute exactly one client/server EVALSHA command per request" >&2
   exit 1
 fi
 if ! jq -e '
