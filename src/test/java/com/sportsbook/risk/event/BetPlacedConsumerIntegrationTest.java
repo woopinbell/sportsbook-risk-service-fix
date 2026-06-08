@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.sportsbook.protocol.event.BetPlacedRequested;
@@ -14,6 +16,8 @@ import com.sportsbook.risk.counter.LimitKeys;
 import com.sportsbook.risk.counter.LimitType;
 import com.sportsbook.risk.counter.SlidingWindowCounter;
 import com.sportsbook.risk.pattern.RedisUserBetHistory;
+import com.sportsbook.risk.reservation.RedisRiskReservationStore;
+import com.sportsbook.risk.service.RiskCheckCommand;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -32,6 +36,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -71,6 +76,8 @@ class BetPlacedConsumerIntegrationTest {
   @Autowired private EmbeddedKafkaBroker embeddedKafka;
   @Autowired private StringRedisTemplate redis;
   @Autowired private SlidingWindowCounter counter;
+  @Autowired private RedisRiskReservationStore reservations;
+  @Autowired private BetPlacedConsumer consumer;
   @SpyBean private RedisUserBetHistory history;
 
   @BeforeEach
@@ -142,6 +149,43 @@ class BetPlacedConsumerIntegrationTest {
     verify(history, atLeast(2)).recordBet(any(), any(), any(Long.class), any(), any());
   }
 
+  @Test
+  void reservedBetEventCommitsOnceAndRedeliveryDoesNotDoubleCount() {
+    Instant now = Instant.now();
+    BetPlacedRequested event = event("40000000-0000-4000-8000-000000000002", now);
+    RiskCheckCommand command =
+        new RiskCheckCommand(
+            event.getUserId().toString(),
+            event.getBetId().toString(),
+            com.sportsbook.protocol.value.Money.krw(event.getStake().getAmount()),
+            event.getSelections().stream()
+                .map(selection -> selection.getSelectionId().toString())
+                .toList(),
+            now);
+    assertThat(reservations.reserve(command).approved()).isTrue();
+    Acknowledgment acknowledgment = mock(Acknowledgment.class);
+
+    consumer.onBetPlaced(AvroCodec.encode(event), event.getUserId().toString(), acknowledgment);
+    consumer.onBetPlaced(AvroCodec.encode(event), event.getUserId().toString(), acknowledgment);
+
+    String userId = event.getUserId().toString();
+    for (LimitType type :
+        List.of(LimitType.STAKE_DAILY, LimitType.STAKE_WEEKLY, LimitType.STAKE_MONTHLY)) {
+      assertThat(counter.currentSum(LimitKeys.userKey(userId, type), type.window(), Instant.now()))
+          .isEqualTo(12_345L);
+      assertThat(redis.opsForZSet().size(LimitKeys.userKey(userId, type))).isEqualTo(1L);
+    }
+    assertThat(
+            counter.currentSum(
+                LimitKeys.userKey(userId, LimitType.SELECTIONS_PER_MINUTE),
+                LimitType.SELECTIONS_PER_MINUTE.window(),
+                Instant.now()))
+        .isEqualTo(2L);
+    assertThat(history.countBetsBetween(userId, now.minusSeconds(1), now.plusSeconds(1)))
+        .isEqualTo(1L);
+    verify(acknowledgment, times(2)).acknowledge();
+  }
+
   private long current(String userId, LimitType type) {
     return counter.currentSum(LimitKeys.userKey(userId, type), type.window(), OCCURRED_AT);
   }
@@ -173,8 +217,12 @@ class BetPlacedConsumerIntegrationTest {
   }
 
   private static BetPlacedRequested event() {
+    return event("40000000-0000-4000-8000-000000000001", OCCURRED_AT);
+  }
+
+  private static BetPlacedRequested event(String betId, Instant requestedAt) {
     return BetPlacedRequested.newBuilder()
-        .setBetId("40000000-0000-4000-8000-000000000001")
+        .setBetId(betId)
         .setUserId("20000000-0000-4000-8000-000000000001")
         .setSlipType(BetSlipTypeTag.MULTIPLE)
         .setSystemMinWins(null)
@@ -185,7 +233,7 @@ class BetPlacedConsumerIntegrationTest {
                 selection("10000000-0000-4000-8000-000000000002")))
         .setStake(Money.newBuilder().setAmount(12_345L).setCurrency("KRW").build())
         .setIdempotencyKey("risk-integration-1")
-        .setRequestedAt(OCCURRED_AT)
+        .setRequestedAt(requestedAt)
         .build();
   }
 

@@ -1,0 +1,37 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out risk service
+        uses: actions/checkout@v4
+
+      - name: Check out fixed shared protocol
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/sportsbook-shared-protocol
+          ref: sportsbook-v2.0.0
+          path: shared-protocol
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Install shared protocol 0.3.0
+        working-directory: shared-protocol
+        run: ./mvnw -B -DskipTests install
+
+      - name: Verify risk service
+        run: ./mvnw -B verify

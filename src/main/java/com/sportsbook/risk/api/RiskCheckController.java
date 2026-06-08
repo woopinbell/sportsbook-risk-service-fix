@@ -14,9 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Critical-path entry point for {@code betting-service}. Translates the REST DTO into a {@link
- * RiskCheckCommand}, lets {@link RiskCheckService} do the evaluation, and renders the outcome back
- * as the response DTO.
+ * Diagnostic risk-evaluation endpoint retained for operators and compatibility callers. Atomic
+ * betting admission is exposed by {@link RiskReservationController}.
  *
  * <p>Path prefix follows ADR-0004: {@code /internal/v1/risk/...} for service-to-service traffic.
  */

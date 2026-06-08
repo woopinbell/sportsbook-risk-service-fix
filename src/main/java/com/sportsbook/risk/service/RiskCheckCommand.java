@@ -19,6 +19,9 @@ public record RiskCheckCommand(
     Objects.requireNonNull(stake, "stake");
     Objects.requireNonNull(selectionIds, "selectionIds");
     Objects.requireNonNull(now, "now");
+    if (stake.amount() <= 0L) {
+      throw new IllegalArgumentException("stake amount must be positive");
+    }
     selectionIds = List.copyOf(selectionIds);
   }
 }

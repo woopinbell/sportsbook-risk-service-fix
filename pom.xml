@@ -12,11 +12,10 @@
 
     <name>risk-service</name>
     <description>
-        Risk service for an online sportsbook. Enforces per-user / per-market
-        betting limits over a Redis sliding window and runs rule-based
-        suspicious pattern detection. Synchronously gates bet placement via
-        POST /internal/v1/risk/check (the betting-service critical path,
-        target p99 &lt; 30ms).
+        Risk service for an online sportsbook. Atomically reserves per-user
+        betting capacity over Redis sliding windows and runs rule-based
+        suspicious pattern detection. POST /internal/v1/risk/check remains a
+        diagnostic view; betting admission uses /internal/v1/risk/reservations.
     </description>
 
     <!--
@@ -35,7 +34,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <spring-boot.version>3.2.11</spring-boot.version>
-        <shared-protocol.version>0.2.0-SNAPSHOT</shared-protocol.version>
+        <shared-protocol.version>0.3.0</shared-protocol.version>
         <testcontainers.version>1.20.3</testcontainers.version>
         <logstash-encoder.version>7.4</logstash-encoder.version>
 

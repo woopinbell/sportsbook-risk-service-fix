@@ -2,7 +2,12 @@
 -- V1 intentionally targets standalone Redis so the complete read is one atomic round-trip.
 
 local nowMs = tonumber(ARGV[1])
-local result = {limits = {counters = {}, overrides = {}}, patterns = {selections = {}}}
+local retentionMs = tonumber(ARGV[20])
+local result = {
+    limits = {counters = {}, overrides = {}},
+    patterns = {selections = {}},
+    expired = 0
+}
 
 local function failure(reply)
     return {ok = false, error = reply.err}
@@ -79,12 +84,61 @@ local function readCounter(zsetKey, sumKey, windowMs, ttlSeconds)
     return success(tostring(current))
 end
 
+local function decrement(key, amount)
+    local nextValue = tonumber(redis.call('GET', key) or '0') - amount
+    if nextValue <= 0 then
+        redis.call('DEL', key)
+    else
+        redis.call('SET', key, tostring(nextValue))
+    end
+end
+
+local function reservedTotals()
+    local expired = redis.call('ZRANGEBYSCORE', KEYS[10], '-inf', nowMs)
+    for i = 1, #expired do
+        local stake, selections, betId = string.match(expired[i], '^(%d+)|(%d+)|(.+)$')
+        if stake ~= nil then
+            local reservationKey = 'risk:reservation:' .. betId
+            local state = redis.call('HGET', reservationKey, 'state')
+            local expiresAt = tonumber(redis.call('HGET', reservationKey, 'expiresAt') or '0')
+            if state ~= 'RESERVED' or expiresAt <= nowMs then
+                local removed = redis.call('ZREM', KEYS[10], expired[i])
+                if removed == 1 then
+                    decrement(KEYS[11], tonumber(stake))
+                    decrement(KEYS[12], tonumber(selections))
+                    decrement(KEYS[13], 1)
+                end
+                if state == 'RESERVED' then
+                    redis.call('HSET', reservationKey,
+                        'state', 'EXPIRED', 'expiredAt', tostring(nowMs))
+                    redis.call('HDEL', reservationKey,
+                        'rejectionReason', 'rejectionCurrent', 'rejectionLimit',
+                        'rejectionRequested', 'rejectionCurrency', 'rejectionAction',
+                        'rejectedAt', 'releasedAt', 'committedAt')
+                    redis.call('PEXPIRE', reservationKey, retentionMs)
+                    result.expired = result.expired + 1
+                end
+            end
+        else
+            redis.call('ZREM', KEYS[10], expired[i])
+        end
+    end
+    return tonumber(redis.call('GET', KEYS[11]) or '0'),
+        tonumber(redis.call('GET', KEYS[12]) or '0')
+end
+
 local names = {'STAKE_DAILY', 'STAKE_WEEKLY', 'STAKE_MONTHLY', 'SELECTIONS_PER_MINUTE'}
+local reservedStake, reservedSelections = reservedTotals()
 for i = 1, #names do
     local keyIndex = (i - 1) * 2 + 1
     local argIndex = (i - 1) * 2 + 2
-    result.limits.counters[names[i]] =
+    local captured =
         readCounter(KEYS[keyIndex], KEYS[keyIndex + 1], tonumber(ARGV[argIndex]), tonumber(ARGV[argIndex + 1]))
+    if captured.ok then
+        local reserved = i == 4 and reservedSelections or reservedStake
+        captured.value = tostring((tonumber(captured.value) or 0) + reserved)
+    end
+    result.limits.counters[names[i]] = captured
 end
 
 for i = 1, #names do
@@ -106,7 +160,7 @@ local repeatedEnabled = ARGV[18] == '1'
 local repeatedWindowMs = tonumber(ARGV[19])
 
 if rapidEnabled then
-    local rapidReply = redis.pcall('ZCOUNT', KEYS[10], nowMs - rapidWindowMs, nowMs)
+    local rapidReply = redis.pcall('ZCOUNT', KEYS[14], nowMs - rapidWindowMs, nowMs)
     if type(rapidReply) == 'table' and rapidReply.err ~= nil then
         result.patterns.rapid = failure(rapidReply)
     else
@@ -117,7 +171,7 @@ else
 end
 
 if suddenEnabled then
-    local stakesReply = redis.pcall('ZREVRANGE', KEYS[10], 0, suddenLookback - 1)
+    local stakesReply = redis.pcall('ZREVRANGE', KEYS[14], 0, suddenLookback - 1)
     if type(stakesReply) == 'table' and stakesReply.err ~= nil then
         result.patterns.stakes = failure(stakesReply)
     else
@@ -139,16 +193,16 @@ else
     result.patterns.stakes = success('[]')
 end
 
-for i = 11, #KEYS do
+for i = 15, #KEYS do
     if repeatedEnabled then
         local selectionReply = redis.pcall('ZCOUNT', KEYS[i], nowMs - repeatedWindowMs, nowMs)
         if type(selectionReply) == 'table' and selectionReply.err ~= nil then
-            result.patterns.selections[tostring(i - 10)] = failure(selectionReply)
+        result.patterns.selections[tostring(i - 14)] = failure(selectionReply)
         else
-            result.patterns.selections[tostring(i - 10)] = success(tostring(selectionReply))
+        result.patterns.selections[tostring(i - 14)] = success(tostring(selectionReply))
         end
     else
-        result.patterns.selections[tostring(i - 10)] = success('0')
+        result.patterns.selections[tostring(i - 14)] = success('0')
     end
 end
 

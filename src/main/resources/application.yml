@@ -5,10 +5,9 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      # command timeout: failure ceiling, not the SLA. 200ms was too aggressive —
-      # cold-start connection init (boot, GC, load) exceeded it and produced false
-      # RedisCommandTimeoutException on the first /check (betting saw read-timeout 500s).
-      # Normal checks still return in ~30ms; this is just the upper bound.
+      # Command timeout: a defensive failure ceiling, not a latency SLA. A historical
+      # 200ms setting produced cold-start command timeouts before betting's 500ms HTTP
+      # read timeout. The hardening release has not remeasured request latency.
       timeout: 1s
       connect-timeout: 5s
       lettuce:
@@ -58,12 +57,15 @@ management:
       service: risk-service
 
 # ----------------------------------------------------------------------
-# Risk policy defaults (ADR-0009). Per-user / per-market overrides live in
-# Redis hashes — see UserLimitOverride / MarketLimitOverride. The default
-# values below are what is applied when no override exists. Currency keys
-# follow shared-protocol Currency enum (KRW, USD).
+# Risk policy defaults (ADR-0009). User overrides live in Redis hashes. Market
+# and open-exposure settings are retained for compatibility but are not part
+# of V1 admission because the request has no market/exposure state. Currency
+# keys follow shared-protocol Currency enum; the deployed V1 key shape is KRW-only.
 # ----------------------------------------------------------------------
 risk:
+  reservations:
+    lease: 2m
+    retention: 32d
   limits:
     stake-daily:
       KRW: 1000000

@@ -12,6 +12,9 @@ import com.sportsbook.risk.pattern.PatternContext;
 import com.sportsbook.risk.pattern.RedisUserBetHistory;
 import com.sportsbook.risk.policy.PatternAction;
 import com.sportsbook.risk.policy.RiskPatternProperties;
+import com.sportsbook.risk.reservation.ReservationKeys;
+import com.sportsbook.risk.reservation.RiskReservationProperties;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -46,15 +49,16 @@ class RedisRiskSnapshotReaderTest {
 
   private static LettuceConnectionFactory factory;
   private static StringRedisTemplate template;
-  private static RedisRiskSnapshotReader reader;
   private static RedisUserBetHistory history;
+
+  private RedisRiskSnapshotReader reader;
+  private SimpleMeterRegistry meters;
 
   @BeforeAll
   static void startInfrastructure() {
     factory = new LettuceConnectionFactory(REDIS.getHost(), REDIS.getMappedPort(6379));
     factory.afterPropertiesSet();
     template = new StringRedisTemplate(factory);
-    reader = new RedisRiskSnapshotReader(template, enabledPatterns(), new ObjectMapper());
     history = new RedisUserBetHistory(template);
   }
 
@@ -66,6 +70,14 @@ class RedisRiskSnapshotReaderTest {
   @BeforeEach
   void flush() {
     template.getRequiredConnectionFactory().getConnection().serverCommands().flushAll();
+    meters = new SimpleMeterRegistry();
+    reader =
+        new RedisRiskSnapshotReader(
+            template,
+            enabledPatterns(),
+            new RiskReservationProperties(Duration.ofMinutes(2), Duration.ofDays(1)),
+            new ObjectMapper(),
+            meters);
   }
 
   @Test
@@ -162,6 +174,87 @@ class RedisRiskSnapshotReaderTest {
     }
     assertThat(observe(snapshot.patterns()))
         .isEqualTo(new PatternObservation(1L, List.of(1_234L), 1L, 1L));
+  }
+
+  @Test
+  void diagnosticLimitSnapshotIncludesActiveReservedCapacity() {
+    String member = "25000|2|reserved-bet";
+    template
+        .opsForZSet()
+        .add(ReservationKeys.userReservations(USER), member, NOW.plusSeconds(120).toEpochMilli());
+    template.opsForValue().set(ReservationKeys.reservedStakeSum(USER), "25000");
+    template.opsForValue().set(ReservationKeys.reservedSelectionSum(USER), "2");
+    template.opsForValue().set(ReservationKeys.ACTIVE_COUNT, "1");
+    template
+        .opsForHash()
+        .putAll(
+            ReservationKeys.reservation("reserved-bet"),
+            java.util.Map.of(
+                "state",
+                "RESERVED",
+                "userId",
+                USER,
+                "member",
+                member,
+                "expiresAt",
+                Long.toString(NOW.plusSeconds(120).toEpochMilli())));
+
+    LimitSnapshot snapshot = reader.readLimits(USER, Currency.KRW, NOW);
+
+    assertThat(snapshot.current(LimitType.STAKE_DAILY)).isEqualTo(25_000L);
+    assertThat(snapshot.current(LimitType.STAKE_WEEKLY)).isEqualTo(25_000L);
+    assertThat(snapshot.current(LimitType.STAKE_MONTHLY)).isEqualTo(25_000L);
+    assertThat(snapshot.current(LimitType.SELECTIONS_PER_MINUTE)).isEqualTo(2L);
+  }
+
+  @Test
+  void snapshotExpiryLeavesTombstoneAndCountsTransitionExactlyOnce() {
+    String member = "25000|2|expired-reservation";
+    template
+        .opsForZSet()
+        .add(ReservationKeys.userReservations(USER), member, NOW.minusMillis(1).toEpochMilli());
+    template.opsForValue().set(ReservationKeys.reservedStakeSum(USER), "25000");
+    template.opsForValue().set(ReservationKeys.reservedSelectionSum(USER), "2");
+    template.opsForValue().set(ReservationKeys.ACTIVE_COUNT, "1");
+    template
+        .opsForHash()
+        .putAll(
+            ReservationKeys.reservation("expired-reservation"),
+            java.util.Map.of(
+                "state",
+                "RESERVED",
+                "fingerprint",
+                "fingerprint-1",
+                "userId",
+                USER,
+                "betId",
+                "expired-reservation",
+                "stake",
+                "25000",
+                "selectionCount",
+                "2",
+                "member",
+                member,
+                "expiresAt",
+                Long.toString(NOW.minusMillis(1).toEpochMilli())));
+
+    LimitSnapshot first = reader.readLimits(USER, Currency.KRW, NOW);
+    LimitSnapshot replay = reader.readLimits(USER, Currency.KRW, NOW.plusMillis(1));
+
+    assertThat(first.current(LimitType.STAKE_DAILY)).isZero();
+    assertThat(replay.current(LimitType.STAKE_DAILY)).isZero();
+    assertThat(
+            template.opsForHash().get(ReservationKeys.reservation("expired-reservation"), "state"))
+        .isEqualTo("EXPIRED");
+    assertThat(template.hasKey(ReservationKeys.userReservations(USER))).isFalse();
+    assertThat(template.hasKey(ReservationKeys.reservedStakeSum(USER))).isFalse();
+    assertThat(template.hasKey(ReservationKeys.reservedSelectionSum(USER))).isFalse();
+    assertThat(template.hasKey(ReservationKeys.ACTIVE_COUNT)).isFalse();
+    assertThat(meters.counter("risk_reservation_expirations_total").count()).isEqualTo(1.0);
+    assertThat(
+            template.getExpire(
+                ReservationKeys.reservation("expired-reservation"), TimeUnit.MILLISECONDS))
+        .isPositive();
   }
 
   @Test

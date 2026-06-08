@@ -549,7 +549,7 @@ if [[ -n "$(git -C "${SHARED_SOURCE_DIR}" status --porcelain --untracked-files=a
   exit 2
 fi
 
-SHARED_VERSION='0.2.0-SNAPSHOT'
+SHARED_VERSION='0.3.0'
 MAVEN_SHARED_ROOT="${MAVEN_REPO_LOCAL}/com/sportsbook/shared-protocol"
 MAVEN_SHARED_DIR="${MAVEN_SHARED_ROOT}/${SHARED_VERSION}"
 MAVEN_SHARED_JAR="${MAVEN_SHARED_DIR}/shared-protocol-${SHARED_VERSION}.jar"

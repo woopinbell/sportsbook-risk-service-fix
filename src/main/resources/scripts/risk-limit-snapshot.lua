@@ -2,7 +2,8 @@
 -- V1 intentionally targets standalone Redis; every key is evaluated by one server-side script.
 
 local nowMs = tonumber(ARGV[1])
-local result = {counters = {}, overrides = {}}
+local retentionMs = tonumber(ARGV[14])
+local result = {counters = {}, overrides = {}, expired = 0}
 
 local function failure(reply)
     return {ok = false, error = reply.err}
@@ -79,12 +80,61 @@ local function readCounter(zsetKey, sumKey, windowMs, ttlSeconds)
     return success(tostring(current))
 end
 
+local function decrement(key, amount)
+    local nextValue = tonumber(redis.call('GET', key) or '0') - amount
+    if nextValue <= 0 then
+        redis.call('DEL', key)
+    else
+        redis.call('SET', key, tostring(nextValue))
+    end
+end
+
+local function reservedTotals()
+    local expired = redis.call('ZRANGEBYSCORE', KEYS[10], '-inf', nowMs)
+    for i = 1, #expired do
+        local stake, selections, betId = string.match(expired[i], '^(%d+)|(%d+)|(.+)$')
+        if stake ~= nil then
+            local reservationKey = 'risk:reservation:' .. betId
+            local state = redis.call('HGET', reservationKey, 'state')
+            local expiresAt = tonumber(redis.call('HGET', reservationKey, 'expiresAt') or '0')
+            if state ~= 'RESERVED' or expiresAt <= nowMs then
+                local removed = redis.call('ZREM', KEYS[10], expired[i])
+                if removed == 1 then
+                    decrement(KEYS[11], tonumber(stake))
+                    decrement(KEYS[12], tonumber(selections))
+                    decrement(KEYS[13], 1)
+                end
+                if state == 'RESERVED' then
+                    redis.call('HSET', reservationKey,
+                        'state', 'EXPIRED', 'expiredAt', tostring(nowMs))
+                    redis.call('HDEL', reservationKey,
+                        'rejectionReason', 'rejectionCurrent', 'rejectionLimit',
+                        'rejectionRequested', 'rejectionCurrency', 'rejectionAction',
+                        'rejectedAt', 'releasedAt', 'committedAt')
+                    redis.call('PEXPIRE', reservationKey, retentionMs)
+                    result.expired = result.expired + 1
+                end
+            end
+        else
+            redis.call('ZREM', KEYS[10], expired[i])
+        end
+    end
+    return tonumber(redis.call('GET', KEYS[11]) or '0'),
+        tonumber(redis.call('GET', KEYS[12]) or '0')
+end
+
 local names = {'STAKE_DAILY', 'STAKE_WEEKLY', 'STAKE_MONTHLY', 'SELECTIONS_PER_MINUTE'}
+local reservedStake, reservedSelections = reservedTotals()
 for i = 1, #names do
     local keyIndex = (i - 1) * 2 + 1
     local argIndex = (i - 1) * 2 + 2
-    result.counters[names[i]] =
+    local captured =
         readCounter(KEYS[keyIndex], KEYS[keyIndex + 1], tonumber(ARGV[argIndex]), tonumber(ARGV[argIndex + 1]))
+    if captured.ok then
+        local reserved = i == 4 and reservedSelections or reservedStake
+        captured.value = tostring((tonumber(captured.value) or 0) + reserved)
+    end
+    result.counters[names[i]] = captured
 end
 
 for i = 1, #names do

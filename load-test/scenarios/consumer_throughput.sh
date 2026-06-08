@@ -1,35 +1,32 @@
 #!/usr/bin/env bash
-# Kafka throughput probe for the bet.placed consumer.
+# Kafka producer/broker acknowledgement probe.
 #
 # k6 has no first-party Kafka producer, so we use the Confluent kafka-producer-perf-test that
 # ships inside the cp-kafka container instead. The script publishes a fixed number of records
-# (default 10 000, matching the repository throughput contract) into the
-# bet.placed topic at a configurable target rate; the script asserts that the consumer
-# (risk-service running on the host) drains every record by polling the consumer group lag.
+# into an isolated probe topic at a configurable target rate and reports producer-to-broker
+# acknowledgement throughput and latency.
 #
-# This is a synthetic byte payload — the bytes are not valid Avro, so the consumer
-# deserialises and throws; the throughput probe still measures producer p99 latency and
-# Kafka broker capacity which is what we care about for the "10 万 events/sec" target in
-# the repository performance contract. A separate Avro-aware producer (Java) is a V2 follow-up; the load-test/README
-# documents the workaround.
+# The payload is synthetic bytes, not a valid BetPlaced Avro record. Consequently this script
+# does not exercise risk-service, poll consumer lag, or support a consumer-throughput claim.
+# Consumer throughput requires an Avro-aware producer plus lag and final Redis-state checks.
 #
 # Usage:
 #   ./scenarios/consumer_throughput.sh                # 10000 records at full speed
-#   RATE=100000 RECORDS=1000000 ./scenarios/consumer_throughput.sh
+#   RATE=5000 RECORDS=50000 ./scenarios/consumer_throughput.sh
 #
 # Env:
 #   RECORDS      total records to publish        (default 10000)
 #   RATE         producer rate cap, recs/sec     (default -1, unlimited)
 #   PAYLOAD_SIZE bytes per record                (default 256)
-#   TOPIC        target topic                    (default bet.placed)
-#   BOOTSTRAP    kafka bootstrap server          (default localhost:9094)
+#   TOPIC        isolated probe topic             (default risk.producer-probe)
+#   INTERNAL_BOOTSTRAP broker address in container (default risk-load-kafka:9092)
 
 set -euo pipefail
 
 RECORDS=${RECORDS:-10000}
 RATE=${RATE:--1}
 PAYLOAD_SIZE=${PAYLOAD_SIZE:-256}
-TOPIC=${TOPIC:-bet.placed}
+TOPIC=${TOPIC:-risk.producer-probe}
 # The perf-test runs inside the kafka container; use the INTERNAL listener.
 INTERNAL_BOOTSTRAP=${INTERNAL_BOOTSTRAP:-risk-load-kafka:9092}
 
@@ -38,7 +35,7 @@ if ! docker ps --format '{{.Names}}' | grep -q '^risk-load-kafka$'; then
   exit 1
 fi
 
-echo "Publishing ${RECORDS} records of ${PAYLOAD_SIZE}B to ${TOPIC} at rate=${RATE}"
+echo "Producer/broker probe: ${RECORDS} records of ${PAYLOAD_SIZE}B to ${TOPIC} at rate=${RATE}"
 docker exec risk-load-kafka kafka-producer-perf-test \
   --topic "${TOPIC}" \
   --num-records "${RECORDS}" \

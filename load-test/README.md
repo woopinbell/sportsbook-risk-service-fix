@@ -1,7 +1,10 @@
 # 위험 서비스 반복 성능 검사
 
-`run-gate.sh`는 위험 확인 API의 소스와 공통 계약을 고정한 뒤 독립된 Redis·Kafka에서
-성능과 Redis 스냅샷 계약을 확인합니다.
+`run-gate.sh`는 진단용 위험 확인 API의 소스와 공통 계약을 고정한 뒤 독립된
+Redis·Kafka에서 성능과 Redis 스냅샷 계약을 확인합니다. 실제 admission 경로인
+`/internal/v1/risk/reservations`의 정확성은 `RedisRiskReservationStoreTest`의 동시
+예약·재실행·만료·확정 시나리오로 검증합니다. 예약 경로의 지속 처리량은 아직 별도
+성능 수치로 인증하지 않습니다.
 
 ## 실행 준비
 
@@ -43,21 +46,22 @@ bash load-test/run-gate.sh baseline final
 
 ## 결과 해석
 
-- 2026-07-13 별도 패치 후보는 최종 다섯 회차를 통과했습니다. 이후 커밋의 성능을
-  대신하지 않는 비교 자료입니다.
-- 2026-07-14 메타데이터 준비 기준을 강화한 기본 경로는 다섯 회차 모두 실패했습니다.
-- 원자 스냅샷 두 번 호출 후보는 첫 회차 p99 64.654ms와 누락 8건으로 실패했습니다.
-- 현재 단일 스냅샷 후보는 첫 회차 p99 268.450ms와 누락 1,030건으로 실패했고 나머지
-  회차를 중단했습니다.
+`results/<날짜>/`의 저장 결과는 모두 포트폴리오 hardening 이전 소스 또는 당시의
+별도 패치 후보를 측정한 역사 자료입니다. 일부 후보의 통과·실패를 비교하는 데에는
+사용할 수 있지만 현재 릴리스의 성능을 대신하지 않습니다.
 
-현재 결과는 기능과 Redis 원자성 검증을 뒷받침하지만 초당 1,000회 운영 용량을
-인증하지 않습니다. 최신 판정과 수치는 [결과 요약](results/BEST.md)에 있습니다.
+현재 기능과 Redis 원자성은 132개 테스트로 검증했습니다. hardening 소스의 예약
+경로와 진단 경로는 지속 처리량을 다시 측정하지 않았으므로 이 릴리스에는 처리량이나
+p95/p99 주장이 없습니다. 현재 판정과 역사 자료의 범위는
+[검증·측정 상태](results/BEST.md)에 있습니다.
 
 ## 보조 검사
 
-`check_latency.js`는 2026-05-29의 예열 없는 지연·포화도 비교에 사용했습니다.
-`consumer_throughput.sh`는 합성 Kafka 메시지의 발행기·브로커 처리량을 측정하며,
-소비자의 계약 검증은 `BetPlacedConsumerIntegrationTest`가 담당합니다.
+`check_latency.js`는 2026-05-29 pre-hardening 지연·포화도 비교에 사용했습니다.
+`consumer_throughput.sh`는 합성 byte를 사용해 producer에서 broker ack까지를
+측정하는 probe입니다. 유효한 Avro 이벤트를 처리하지 않으므로 consumer 처리량을
+측정하지 않습니다. 소비자의 계약과 중복 반영 방지는
+`BetPlacedConsumerIntegrationTest`가 검증합니다.
 
 ```sh
 docker compose -f load-test/docker-compose.yml down -v --remove-orphans

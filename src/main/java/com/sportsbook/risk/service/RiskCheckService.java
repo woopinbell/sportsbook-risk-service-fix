@@ -20,9 +20,10 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
- * Synchronous risk evaluation for a candidate bet. Executes in the betting-service critical path,
- * so an approved request uses one Redis round-trip for an atomic limit, override, and pattern-fact
- * snapshot. Java still returns at the first limit breach in the established decision order.
+ * Diagnostic risk evaluation for a candidate bet. Betting admission uses {@code
+ * /internal/v1/risk/reservations}; this service keeps the original read API for operators and
+ * compatibility callers. Its snapshot includes active reservation totals but does not create a
+ * lease. Java still returns at the first limit breach in the established decision order.
  *
  * <p>Order matters and is intentionally simple-to-expensive:
  *
@@ -72,7 +73,7 @@ public class RiskCheckService {
     this.meters = meters;
     this.checkTimer =
         Timer.builder("risk_check_latency_seconds")
-            .description("Latency of /internal/v1/risk/check critical path")
+            .description("Latency of the diagnostic /internal/v1/risk/check path")
             .register(meters);
   }
 

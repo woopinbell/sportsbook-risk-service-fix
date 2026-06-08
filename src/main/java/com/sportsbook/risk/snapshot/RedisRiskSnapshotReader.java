@@ -8,6 +8,10 @@ import com.sportsbook.risk.counter.LimitKeys;
 import com.sportsbook.risk.counter.LimitType;
 import com.sportsbook.risk.pattern.PatternContext;
 import com.sportsbook.risk.policy.RiskPatternProperties;
+import com.sportsbook.risk.reservation.ReservationKeys;
+import com.sportsbook.risk.reservation.RiskReservationProperties;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,21 +40,32 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
 
   private final StringRedisTemplate redis;
   private final RiskPatternProperties patterns;
+  private final RiskReservationProperties reservations;
   private final ObjectMapper mapper;
   private final RedisScript<String> snapshotScript;
   private final RedisScript<String> limitScript;
   private final RedisScript<String> patternScript;
+  private final Counter expirationCounter;
 
   public RedisRiskSnapshotReader(
-      StringRedisTemplate redis, RiskPatternProperties patterns, ObjectMapper mapper) {
+      StringRedisTemplate redis,
+      RiskPatternProperties patterns,
+      RiskReservationProperties reservations,
+      ObjectMapper mapper,
+      MeterRegistry meters) {
     this.redis = redis;
     this.patterns = patterns;
+    this.reservations = reservations;
     this.mapper = mapper;
     this.snapshotScript = new DefaultRedisScript<>(load("scripts/risk-snapshot.lua"), String.class);
     this.limitScript =
         new DefaultRedisScript<>(load("scripts/risk-limit-snapshot.lua"), String.class);
     this.patternScript =
         new DefaultRedisScript<>(load("scripts/risk-pattern-snapshot.lua"), String.class);
+    this.expirationCounter =
+        Counter.builder("risk_reservation_expirations_total")
+            .description("Reservation leases transitioned after expiry")
+            .register(meters);
   }
 
   @Override
@@ -67,6 +82,10 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
     for (LimitType type : LimitType.values()) {
       args.add(overrideField(type, currency));
     }
+    keys.add(ReservationKeys.userReservations(userId));
+    keys.add(ReservationKeys.reservedStakeSum(userId));
+    keys.add(ReservationKeys.reservedSelectionSum(userId));
+    keys.add(ReservationKeys.ACTIVE_COUNT);
 
     RiskPatternProperties.RapidBetting rapid = patterns.rapidBetting();
     RiskPatternProperties.SuddenStakeIncrease sudden = patterns.suddenStakeIncrease();
@@ -81,8 +100,10 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
     args.add(Integer.toString(sudden.lookbackBets()));
     args.add(enabled(repeated.enabled()));
     args.add(Long.toString(Duration.ofHours(repeated.windowHours()).toMillis()));
+    args.add(Long.toString(reservations.retention().toMillis()));
 
     RiskWire wire = readWire(snapshotScript, keys, args, RiskWire.class);
+    expirationCounter.increment(wire.expired());
     return new RiskSnapshot(
         toLimitSnapshot(userId, currency, wire.limits()),
         toPatternSnapshot(context, wire.patterns()));
@@ -102,8 +123,14 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
     for (LimitType type : LimitType.values()) {
       args.add(overrideField(type, currency));
     }
+    args.add(Long.toString(reservations.retention().toMillis()));
+    keys.add(ReservationKeys.userReservations(userId));
+    keys.add(ReservationKeys.reservedStakeSum(userId));
+    keys.add(ReservationKeys.reservedSelectionSum(userId));
+    keys.add(ReservationKeys.ACTIVE_COUNT);
 
     LimitWire wire = readWire(limitScript, keys, args, LimitWire.class);
+    expirationCounter.increment(wire.expired());
     return toLimitSnapshot(userId, currency, wire);
   }
 
@@ -239,9 +266,10 @@ public class RedisRiskSnapshotReader implements RiskSnapshotReader {
 
   private record WireSlot(boolean ok, String value, String error) {}
 
-  private record LimitWire(Map<String, WireSlot> counters, Map<String, WireSlot> overrides) {}
+  private record LimitWire(
+      Map<String, WireSlot> counters, Map<String, WireSlot> overrides, long expired) {}
 
   private record PatternWire(WireSlot rapid, WireSlot stakes, Map<String, WireSlot> selections) {}
 
-  private record RiskWire(LimitWire limits, PatternWire patterns) {}
+  private record RiskWire(LimitWire limits, PatternWire patterns, long expired) {}
 }
