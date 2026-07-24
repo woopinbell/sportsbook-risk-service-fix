@@ -5,9 +5,9 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      # Command timeout: a defensive failure ceiling, not a latency SLA. A historical
-      # 200ms setting produced cold-start command timeouts before betting's 500ms HTTP
-      # read timeout. The hardening release has not remeasured request latency.
+      # 명령 제한 시간은 지연 SLA가 아니라 장애가 길어지는 것을 막기 위한 상한입니다.
+      # 과거 200ms 설정에서는 betting의 HTTP 읽기 제한 시간인 500ms가 지나기 전에
+      # 콜드 스타트 명령이 먼저 실패했습니다. 안정화 이후 요청 지연은 다시 측정하지 않았습니다.
       timeout: 1s
       connect-timeout: 5s
       lettuce:

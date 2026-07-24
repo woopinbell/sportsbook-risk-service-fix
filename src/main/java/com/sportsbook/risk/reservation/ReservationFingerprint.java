@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-/** Creates a deterministic, order-independent selection fingerprint for idempotency checks. */
+/** 선택지 순서와 관계없이 같은 결과를 내는 멱등성 확인용 요청 해시를 만듭니다. */
 final class ReservationFingerprint {
 
   private ReservationFingerprint() {}

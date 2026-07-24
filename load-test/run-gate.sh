@@ -410,26 +410,25 @@ record_artifact_binding() {
 
   printf 'source_path\tsource_sha256\tjar_entry\tjar_sha256\tstatus\n' \
     > "${OUTPUT_DIR}/snapshot-script-binding.tsv"
-  for script in risk-snapshot.lua; do
-    source_script_sha=$(shasum -a 256 \
-      "${REPO_ROOT}/src/main/resources/scripts/${script}" | awk '{print $1}')
-    jar_script_sha=$(unzip -p "${JAR_PATH}" "BOOT-INF/classes/scripts/${script}" \
-      | shasum -a 256 | awk '{print $1}')
-    if [[ "${source_script_sha}" != "${jar_script_sha}" ]]; then
-      printf '%s\t%s\t%s\t%s\tFAIL\n' \
-        "src/main/resources/scripts/${script}" \
-        "${source_script_sha}" \
-        "BOOT-INF/classes/scripts/${script}" \
-        "${jar_script_sha}" >> "${OUTPUT_DIR}/snapshot-script-binding.tsv"
-      echo "Embedded ${script} does not match the measured source tree" >&2
-      return 1
-    fi
-    printf '%s\t%s\t%s\t%s\tPASS\n' \
+  local script="risk-snapshot.lua"
+  source_script_sha=$(shasum -a 256 \
+    "${REPO_ROOT}/src/main/resources/scripts/${script}" | awk '{print $1}')
+  jar_script_sha=$(unzip -p "${JAR_PATH}" "BOOT-INF/classes/scripts/${script}" \
+    | shasum -a 256 | awk '{print $1}')
+  if [[ "${source_script_sha}" != "${jar_script_sha}" ]]; then
+    printf '%s\t%s\t%s\t%s\tFAIL\n' \
       "src/main/resources/scripts/${script}" \
       "${source_script_sha}" \
       "BOOT-INF/classes/scripts/${script}" \
       "${jar_script_sha}" >> "${OUTPUT_DIR}/snapshot-script-binding.tsv"
-  done
+    echo "Embedded ${script} does not match the measured source tree" >&2
+    return 1
+  fi
+  printf '%s\t%s\t%s\t%s\tPASS\n' \
+    "src/main/resources/scripts/${script}" \
+    "${source_script_sha}" \
+    "BOOT-INF/classes/scripts/${script}" \
+    "${jar_script_sha}" >> "${OUTPUT_DIR}/snapshot-script-binding.tsv"
 
   shared_count=$(grep -Ec '^BOOT-INF/lib/shared-protocol-[^/]+\.jar$' \
     "${OUTPUT_DIR}/jar-contents.txt" || true)

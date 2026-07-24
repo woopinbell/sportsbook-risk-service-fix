@@ -5,7 +5,6 @@ import com.sportsbook.protocol.event.RiskLimitType;
 import com.sportsbook.protocol.event.RiskLimitViolated;
 import com.sportsbook.protocol.event.RiskPatternSuspected;
 import com.sportsbook.protocol.event.RiskPatternType;
-import com.sportsbook.risk.counter.LimitType;
 import com.sportsbook.risk.pattern.PatternMatch;
 import com.sportsbook.risk.service.LimitRejection;
 import java.time.Instant;
@@ -18,18 +17,14 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 /**
- * Publishes the {@code risk.limit.violated} and {@code risk.pattern.suspected} Avro events that the
- * rest of the platform (admin-api dashboards, settlement audit, downstream alerting) consume.
+ * 운영 화면, 정산 감사, 알림에서 사용하는 {@code risk.limit.violated}와 {@code risk.pattern.suspected} Avro 이벤트를
+ * 발행합니다.
  *
- * <p>Partition key is {@code userId} (ADR-0006 — same-key ordering inside a single user's stream),
- * payloads are Avro-encoded via {@link AvroCodec}.
+ * <p>사용자별 순서를 유지하기 위해 {@code userId}를 파티션 키로 사용하며(ADR-0006), {@link AvroCodec}으로 직렬화합니다.
  *
- * <p>The shared-protocol Avro {@link RiskLimitType} enum only covers {@code STAKE_DAILY /
- * OPEN_EXPOSURE / SELECTIONS_PER_MINUTE}. The internal {@link LimitType} additionally tracks {@code
- * STAKE_WEEKLY} and {@code STAKE_MONTHLY}, and {@code SINGLE_BET_MAX} is a per-bet threshold rather
- * than a sliding-window limit. Rejections for those internal-only types are logged for ops and
- * {@code risk_limit_violations_total} but are not published — the wire schema stays the source of
- * truth for the public catalogue and grows via the V2 Apicurio evolution path.
+ * <p>공통 계약의 {@link RiskLimitType}은 {@code STAKE_DAILY / OPEN_EXPOSURE / SELECTIONS_PER_MINUTE}만
+ * 제공합니다. 내부에서만 사용하는 {@code STAKE_WEEKLY}, {@code STAKE_MONTHLY}, {@code SINGLE_BET_MAX} 거절은 로그와
+ * {@code risk_limit_violations_total} 지표에만 남기고 이벤트로 발행하지 않습니다.
  */
 @Component
 public class RiskEventPublisher {
