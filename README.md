@@ -13,17 +13,18 @@ betting-service ──HTTP──▶ POST /internal/v1/risk/reservations
        │                         ▼
        └──Kafka: bet.placed.v1──▶ Redis 확정 집계·패턴 이력
 
-admin-api ──HTTP──▶ 사용자·마켓 한도 조회와 변경
+admin-api ──HTTP──▶ 사용자 한도 조회와 변경
 risk-service ──Kafka──▶ risk.limit.violated / risk.pattern.suspected
 ```
 
-패턴 판정을 먼저 계산한 뒤 예약 생성 Lua 스크립트가 만료 예약 정리, 멱등
-요청 지문 검사, 확정액과 예약액을 합친 일·주·월/분당 한도 검사, 최종
-`REJECTED` 또는 `RESERVED` 기록을 한 번에 수행합니다. 따라서 패턴 차단 여부를
-판정하는 도중 같은 요청이 임시 승인되는 구간이 없고, 마지막 남은 한도를 향한 동시
-요청도 Redis가 직렬화합니다.
+패턴용 Redis 스냅샷을 읽어 Java 규칙을 평가한 뒤 그 판정을 예약 Lua에 전달합니다.
+Lua는 만료 예약 정리, 멱등 요청 지문 검사, 확정액과 예약액을 합친 일·주·월/분당
+한도 검사, 전달받은 패턴 판정과 최종 `REJECTED` 또는 `RESERVED` 기록을 한 번에
+수행합니다. 마지막 남은 한도를 향한 동시 요청과 최종 판정 기록은 Redis가
+직렬화하지만, 패턴 스냅샷 조회와 Java 규칙 평가 자체가 같은 Lua 실행에 포함되는
+것은 아닙니다.
 
-`risk:reservation:<betId>` 해시는 활성 예약뿐 아니라 전체 상태 이력을 보관합니다.
+`risk:reservation:<betId>` 해시는 활성 예약뿐 아니라 종료 상태도 보관합니다.
 `REJECTED`, `RELEASED`, `EXPIRED`, `COMMITTED`도 기본 32일 동안 요청 지문과
 결정 정보(`patternsFlagged` 포함)를 보존합니다. 이 기간에는 상태와 관계없이 같은
 betId에 다른 요청 본문을 사용하면 409를 반환합니다. 같은 요청 본문의 `REJECTED`는
@@ -33,8 +34,8 @@ betId에 다른 요청 본문을 사용하면 409를 반환합니다. 같은 요
 재검사·재예약할 수 있습니다.
 
 `bet.placed.v1`가 먼저 또는 다시 도착해도 예약이 있으면 원자적으로 확정하거나 이미
-확정된 상태를 확인합니다. 예약이 없는 기존 이벤트만 과거 방식으로 집계하므로
-전환기 발행자도 지원합니다.
+확정된 상태를 확인합니다. 예약이 없는 이벤트만 호환 집계 경로로 처리하므로
+예약 API를 사용하지 않는 발행자도 지원합니다.
 
 ## 판단 항목
 
@@ -76,27 +77,32 @@ betId에 다른 요청 본문을 사용하면 409를 반환합니다. 같은 요
 ./mvnw spring-boot:run
 ```
 
-Redis와 Kafka가 필요합니다. 전체 서비스 구성은
-[통합 저장소](https://github.com/woopinbell/sportsbook-orchestration)를 참고해
-주세요.
+Redis와 Kafka가 필요합니다. 전체 서비스 구성은 `sportsbook-orchestration`의
+Compose 설정과 아키텍처 색인을 참고해 주세요.
 
 예약 스크립트는 동적 키로 상태를 원자적으로 옮기므로 V1 배포 대상은 단일 노드
 Redis입니다. `risk_reservation_requests_total`,
 `risk_reservation_transitions_total`, `risk_reservation_lua_latency_seconds`,
 `risk_reservation_expirations_total`, `risk_reservations_active`로
 생성·재실행·거절·충돌·확정·해제·만료와 현재 예약 수를 관찰할 수 있습니다.
+`risk_reservations_active`는 예약·확정·해제 또는 스냅샷 조회가 만료 항목을 정리할
+때 갱신되는 값입니다. 만료 시각이 지났다는 이유만으로 즉시 감소하는 실시간 gauge는
+아닙니다.
+
+## 설계와 문제 해결 기록
+
+- [위험 판정과 Redis 키 경계](architecture/risk-admission-and-redis-keyspace.md)
+- [마지막 용량을 지키는 원자 예약](devlog/01-atomic-capacity-reservation.md)
+- [일관된 스냅샷과 만료 카운터 보정](devlog/02-atomic-snapshots-and-counter-repair.md)
+- [베팅 이벤트 재전달과 패턴 이력](devlog/03-bet-placed-redelivery-and-pattern-history.md)
 
 ## 검증 결과
 
-현재 소스는 132개 기능 테스트와 Spotless, Checkstyle 검증을 통과했습니다. 기능
-검증은 마지막 남은 한도를 향한 20개 동시 요청 중 정확히 한 건만 예약되는지, 동일
-요청 100회가 예약 한 건으로 수렴하는지, 요청 본문 충돌, 해제·만료·확정, 기존 이벤트
-호환성, Redis 스냅샷 일관성을 포함합니다.
+기능 검증은 마지막 남은 한도를 향한 20개 동시 요청 중 정확히 한 건만 예약되는지,
+동일 요청 100회가 예약 한 건으로 수렴하는지, 요청 본문 충돌, 해제·만료·확정,
+이벤트 재전달과 Redis 스냅샷 일관성을 포함합니다.
 
-안정화 작업을 마친 뒤에는 현재 소스로 지연 시간이나 지속 처리량을 다시 측정하지
-않았습니다. 따라서 RPS, p95/p99 또는 Kafka 소비 처리량을 제시하지 않습니다.
-`load-test/results/<날짜>/`의 수치는 모두 안정화 전 소스에서 만든 과거 비교
-자료이며 현재 코드의 성능 근거가 아닙니다. 측정 도구와 재검증 조건은
+지연 시간이나 지속 처리량은 아직 제시하지 않습니다. 측정 도구와 결과 채택 조건은
 [부하 검증 문서](load-test/README.md)에 있습니다.
 
 ## 현재 범위
