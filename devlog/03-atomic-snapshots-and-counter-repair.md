@@ -1,4 +1,4 @@
-# 일관된 스냅샷과 만료 카운터 보정
+# 한 시점으로 읽는 스냅샷과 만료 카운터 보정
 
 ## 여러 GET은 서로 다른 시점을 섞는다
 
@@ -6,10 +6,14 @@
 있다. 진단 결과가 어느 한 시점의 상태도 아니게 된다. Java에서 pipeline으로
 왕복 횟수만 줄여도 명령 사이에 다른 writer가 들어오는 문제는 남는다.
 
-`RedisRiskSnapshotReader.read()`는 한 사용자의 카운터, override, 활성 예약과 패턴
-이력을 `risk-snapshot.lua` 한 번으로 읽는다. 한도만 필요한 진단은
-`risk-limit-snapshot.lua`, 패턴만 필요한 예약 replay는
-`risk-pattern-snapshot.lua`를 사용한다.
+[`RedisRiskSnapshotReader.read()`](../src/main/java/com/sportsbook/risk/snapshot/RedisRiskSnapshotReader.java)는
+한 사용자의 카운터, override, 활성 예약과 패턴 이력을
+[`risk-snapshot.lua`](../src/main/resources/scripts/risk-snapshot.lua) 한 번으로 읽는다.
+한도만 필요한 진단은
+[`risk-limit-snapshot.lua`](../src/main/resources/scripts/risk-limit-snapshot.lua),
+패턴만 필요한 예약 replay는
+[`risk-pattern-snapshot.lua`](../src/main/resources/scripts/risk-pattern-snapshot.lua)를
+사용한다.
 
 ```java
 RiskWire wire = readWire(snapshotScript, keys, args, RiskWire.class);
@@ -68,15 +72,12 @@ gauge를 초 단위 실시간 lease 수로 해석하지 않는다. `activeCount(
 sum을 줄인다. 그러나 손상된 member를 언제나 완전히 복구하는 일반 validator는
 아니다.
 
-`RedisRiskSnapshotReaderTest`는 빈 조회가 키를 만들지 않는지, 만료 정리와 고아 합계
+[`RedisRiskSnapshotReaderTest`](../src/test/java/com/sportsbook/risk/snapshot/RedisRiskSnapshotReaderTest.java)는
+빈 조회가 키를 만들지 않는지, 만료 정리와 고아 합계
 보정, TTL 갱신, wrong-type slot, writer와 snapshot의 전후 원자성을 검사한다.
-`RedisRiskReservationStoreTest`는 예약 생성·재실행·확정·해제·만료 뒤 합계 키와 활성
-수가 예상값으로 돌아오는지 확인한다.
-
-```sh
-./mvnw \
-  -Dtest=RedisRiskSnapshotReaderTest,RedisRiskReservationStoreTest test
-```
+[`RedisRiskReservationStoreTest`](../src/test/java/com/sportsbook/risk/reservation/RedisRiskReservationStoreTest.java)는
+예약 생성·재실행·확정·해제·만료 뒤 합계 키와 활성 수가 예상값으로 돌아오는지
+확인한다.
 
 활성 예약 ZSET을 직접 다시 합산해 보조 합계와 주기적으로 대조하는 운영 검사는 없다.
 lifecycle hash 전체를 열거해 재구축하는 절차도 제공하지 않는다. snapshot은 한

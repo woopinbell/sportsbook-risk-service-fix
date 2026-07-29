@@ -1,4 +1,4 @@
-# 마지막 용량을 지키는 원자 예약
+# 마지막 용량 하나를 지키는 원자 예약
 
 ## check-then-write는 한도를 넘긴다
 
@@ -8,7 +8,8 @@
 있지만, 만료 정리와 네 종류의 한도를 읽고 여러 키를 갱신하는 재시도 경로가
 복잡해진다.
 
-`risk-reserve.lua`는 만료 항목 정리, fingerprint 판정, 확정 카운터와 예약 합계 계산,
+[`risk-reserve.lua`](../src/main/resources/scripts/risk-reserve.lua)는 만료 항목 정리,
+fingerprint 판정, 확정 카운터와 예약 합계 계산,
 한도 비교, RESERVED 또는 REJECTED hash 저장을 한 번에 수행한다. 마지막 용량을 노린
 동시 요청은 Redis가 스크립트를 실행한 순서대로 하나만 승인된다.
 
@@ -62,7 +63,8 @@ end
 있어야 하기 때문이다. RELEASED나 REJECTED까지 다시 활성화하면 보상된 접수가
 되살아난다.
 
-`RedisRiskReservationStore.needsPatternEvaluation()`은 기존 hash의 상태와 fingerprint를
+[`RedisRiskReservationStore.needsPatternEvaluation()`](../src/main/java/com/sportsbook/risk/reservation/RedisRiskReservationStore.java)은
+기존 hash의 상태와 fingerprint를
 먼저 읽어 replay에 불필요한 패턴 평가를 줄인다. 이 읽기는 권위 판정이 아니다. 직후
 상태가 달라져도 reserve Lua가 fingerprint와 lifecycle을 다시 확인한다.
 
@@ -80,17 +82,14 @@ version을 함께 비교해 재시도해야 한다.
 
 ## 경쟁 검증과 지원 경계
 
-`RedisRiskReservationStoreTest`는 다음 상태를 실제 Redis에서 확인한다.
+[`RedisRiskReservationStoreTest`](../src/test/java/com/sportsbook/risk/reservation/RedisRiskReservationStoreTest.java)는
+다음 상태를 실제 Redis에서 확인한다.
 
 - 마지막 용량을 놓고 경쟁하는 20개 요청 중 하나만 승인
 - 같은 fingerprint 요청 100개가 예약 하나와 최초 패턴 결과로 수렴
 - 다른 fingerprint 충돌
 - commit·release·expiry 뒤 합계와 lifecycle tombstone
 - tombstone TTL이 끝나기 전 betId 재사용 거절
-
-```sh
-./mvnw -Dtest=RedisRiskReservationStoreTest test
-```
 
 검사는 standalone Redis를 사용한다. 스크립트가 lifecycle에서 사용자별 키를
 동적으로 구성하므로 Redis Cluster의 hash slot 계약을 충족하지 않으며 현재 지원

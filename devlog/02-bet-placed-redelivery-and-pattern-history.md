@@ -1,4 +1,4 @@
-# 베팅 이벤트 재전달과 패턴 이력
+# 재전달되는 베팅 이벤트와 패턴 이력
 
 ## 새 발행자와 기존 발행자를 함께 받는다
 
@@ -47,7 +47,8 @@ fingerprint dedup 저장소가 없다.
 이력에 넣지 않고 `bet.placed`가 온 뒤 기록한다. 미완료·보상된 접수가 사용자 행동
 이력에 남지 않게 하기 위해서다.
 
-`RedisUserBetHistory.recordBet()`은 사용자 bet ZSET과 selection별 ZSET을 여러 Redis
+[`RedisUserBetHistory.recordBet()`](../src/main/java/com/sportsbook/risk/pattern/RedisUserBetHistory.java)은
+사용자 bet ZSET과 selection별 ZSET을 여러 Redis
 명령으로 쓴다. 하나의 Lua 트랜잭션은 아니다. 중간 실패 뒤 재전달되면 같은 member의
 `ZADD`가 이미 쓴 부분을 덮어 최종적으로 수렴하지만, 처리 도중에는 일부 이력만 보일
 수 있다.
@@ -63,14 +64,13 @@ fingerprint dedup 저장소가 없다.
 
 ## 재전달 검증과 남는 운영 공백
 
-`BetPlacedConsumerIntegrationTest`는 첫 처리의 Redis 실패 뒤 같은 Kafka record가
+[`BetPlacedConsumerIntegrationTest`](../src/test/java/com/sportsbook/risk/event/BetPlacedConsumerIntegrationTest.java)는
+첫 처리의 Redis 실패 뒤 같은 Kafka record가
 다시 전달돼 counter와 history가 수렴하는지, 예약된 bet의 재전달이 확정 카운터를
-두 번 늘리지 않는지 확인한다. `BetPlacedConsumerTest`는 ack가 성공 뒤에만 호출되는지,
+두 번 늘리지 않는지 확인한다.
+[`BetPlacedConsumerTest`](../src/test/java/com/sportsbook/risk/event/BetPlacedConsumerTest.java)는
+ack가 성공 뒤에만 호출되는지,
 tombstone이 legacy counter로 떨어지지 않는지를 분리해 검사한다.
-
-```sh
-./mvnw -Dtest=BetPlacedConsumerIntegrationTest,BetPlacedConsumerTest test
-```
 
 현재 risk 서비스에는 명시적인 `DefaultErrorHandler`나 DLT publisher 구성이 없다.
 계속 실패하는 payload의 격리·재처리 절차를 서비스가 제공한다고 볼 수 없다. 또한

@@ -92,9 +92,10 @@ Redis입니다. `risk_reservation_requests_total`,
 ## 설계와 문제 해결 기록
 
 - [위험 판정과 Redis 키 경계](architecture/risk-admission-and-redis-keyspace.md)
-- [마지막 용량을 지키는 원자 예약](devlog/01-atomic-capacity-reservation.md)
-- [일관된 스냅샷과 만료 카운터 보정](devlog/02-atomic-snapshots-and-counter-repair.md)
-- [베팅 이벤트 재전달과 패턴 이력](devlog/03-bet-placed-redelivery-and-pattern-history.md)
+- [숫자 한도에서 위험 판정기로 넓혀 간 과정](devlog/01-limits-overrides-and-pattern-rules.md)
+- [재전달되는 베팅 이벤트와 패턴 이력](devlog/02-bet-placed-redelivery-and-pattern-history.md)
+- [한 시점으로 읽는 스냅샷과 만료 카운터 보정](devlog/03-atomic-snapshots-and-counter-repair.md)
+- [마지막 용량 하나를 지키는 원자 예약](devlog/04-atomic-capacity-reservation.md)
 
 ## 검증 결과
 
