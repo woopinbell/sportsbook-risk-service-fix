@@ -23,6 +23,33 @@ acknowledgment.acknowledge();
 보상됐거나 만료된 예약이 legacy 이벤트로 되살아난다. 이 상태들은 counter를 만들지
 않고 history 확인 경로로만 간다.
 
+## SYSTEM에서는 같은 stake가 같은 단위가 아니다
+
+betting의 SYSTEM stake는 조합 한 줄에 거는 unit이다. 위험 예약과 지갑 차감에는
+`unit × C(N,K)` 총액을 보내지만, 수락 이벤트를 만들 때는 `Bet.stake`를 그대로
+`BetPlacedRequested.stake`에 넣는다. 이벤트에는 K와 N이 함께 있어 총액을 계산할
+재료는 있지만 현재 `BetPlacedConsumer`는 `slipType`, `systemMinWins`,
+`systemTotalSelections`를 읽지 않는다.
+
+이 차이는 예약 유무에 따라 다른 곳에 나타난다.
+
+- 예약이 있으면 Lua가 이미 총액으로 일·주·월 용량을 잡았으므로 이벤트 소비자는 예약만
+  COMMITTED로 옮긴다. 누적 한도는 맞지만 `history.recordBet()`에는 이벤트의 unit이
+  들어간다.
+- 예약이 없으면 `recordLegacyCounters()`도 이벤트의 unit을 사용한다. SYSTEM의
+  일·주·월 사용량이 실제 차감액보다 `C(N,K)`배 작아지고 패턴 이력도 unit으로 남는다.
+
+새 예약의 `PatternContext.stake`는 betting이 보낸 총액이다. 반면 과거 SYSTEM
+이력은 unit이므로 `SuddenStakeIncreaseRule`이 같은 크기의 SYSTEM 베팅을 급격한
+증가로 판단할 수 있다. SINGLE과 MULTIPLE은 라인이 하나라 두 값이 우연히 같다.
+현재 `BetPlacedConsumerTest`와 통합 테스트도 이 두 종류만 사용해 단위 차이를
+고정하지 못한다.
+
+`BetPlacedConsumer`에서 K/N 조합 수를 계산해 total을 저장하거나, event에 unit과 total을
+서로 다른 이름으로 함께 싣거나, 패턴 후보와 이력을 모두 unit 기준으로 바꾸는 방법
+중 하나를 계약으로 정해야 한다. 지금 상태에서 “예약 없는 발행자도 같은 의미로
+지원한다”고 일반화할 수 있는 범위는 SINGLE과 MULTIPLE까지다.
+
 ## offset은 Redis 반영 뒤 확인한다
 
 consumer는 예약 전이 또는 legacy 카운터, 패턴 이력 기록이 모두 성공한 뒤 Kafka

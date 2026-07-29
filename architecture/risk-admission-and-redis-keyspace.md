@@ -59,6 +59,12 @@ RELEASED를 다시 활성화하지 않는 이유는 betting-service가 보상 �
 
 ## 이벤트 계약
 
+`BetPlacedRequested.stake`는 SYSTEM에서 unit이고, 예약 HTTP 요청의 stake는
+`unit × C(N,K)` 총액이다. 예약이 존재하면 Lua counter는 총액을 이미 반영하지만
+`BetPlacedConsumer`가 남기는 패턴 이력은 event의 unit이다. 예약이 없는 호환
+경로에서는 일·주·월 counter도 unit으로 기록된다. 따라서 현재 SYSTEM의 legacy
+누적액과 sudden-stake 이력은 예약 API와 같은 금액 단위를 보장하지 않는다.
+
 내부 한도 종류와 공통 프로토콜 enum이 같지 않다. Kafka `risk.limit.violated`는 `STAKE_DAILY`와 `SELECTIONS_PER_MINUTE`만 매핑된다. `STAKE_WEEKLY`, `STAKE_MONTHLY`, `SINGLE_BET_MAX`는 로그와 metric에만 남는다. 모든 거절을 이벤트 수만으로 집계하면 실제보다 적게 보인다.
 
 [`BetPlacedConsumer`](../src/main/java/com/sportsbook/risk/event/BetPlacedConsumer.java)는

@@ -42,7 +42,19 @@ betId에 다른 요청 본문을 사용하면 409를 반환합니다. 같은 요
 
 `bet.placed.v1`가 먼저 또는 다시 도착해도 예약이 있으면 원자적으로 확정하거나 이미
 확정된 상태를 확인합니다. 예약이 없는 이벤트만 호환 집계 경로로 처리하므로
-예약 API를 사용하지 않는 발행자도 지원합니다.
+예약 API를 사용하지 않는 발행자도 처리할 수 있습니다. 다만 이 호환은 SYSTEM
+금액까지 정확하다는 뜻이 아닙니다. betting이 예약 API에 보내는 값은
+`unit stake × C(N,K)` 총액이지만 `BetPlacedRequested.stake`에는 unit만 들어갑니다.
+현재 이벤트 소비자는 K/N을 이용해 총액을 다시 계산하지 않습니다.
+
+예약이 있는 SYSTEM은 예약 단계에서 누적 한도를 총액으로 잡지만, Kafka 이벤트
+소비자가 남기는 패턴 이력은 unit입니다. 다음 예약의 sudden-stake 후보는 다시 총액이므로
+과거 중앙값과 단위가 달라질 수 있습니다. 예약이 없는 SYSTEM 이벤트는 legacy
+일·주·월 counter까지 unit으로 기록해 실제 총액보다 작습니다. 이 소비 경로의
+테스트도 현재 SINGLE과 MULTIPLE만 다루며 SYSTEM 반례는 없습니다. 자세한 값의
+흐름과 가능한 수정 방향은
+[`재전달되는 베팅 이벤트와 패턴 이력`](devlog/02-bet-placed-redelivery-and-pattern-history.md)에
+남겼습니다.
 
 ## 판단 항목
 
