@@ -68,3 +68,15 @@ RELEASED를 다시 활성화하지 않는 이유는 betting-service가 보상 �
 [`RiskEventPublisher`](../src/main/java/com/sportsbook/risk/event/RiskEventPublisher.java)가
 맡는다. Kafka 재전달을 허용하는 대신 betId가 Redis member와 예약 키에서 같은
 작업을 가리키도록 맞춘 구조다.
+
+소비와 발행의 보장은 서로 다르다. consumer는 Redis 반영 뒤 offset을 확인해
+실패한 입력을 다시 받을 수 있지만, publisher는 `KafkaTemplate.send()`의 future를
+기다리거나 callback으로 관찰하지 않는다. `send()` 호출이 동기적으로 예외를
+던지면 호출 경로에 드러날 수 있으나, broker 확인이 나중에 실패하면 이미 끝난
+예약과 응답에 전달되지 않는다.
+
+위험 이벤트에는 아웃박스, 미발행 행, 재발행 작업이 없다. 따라서
+`risk.limit.violated`와 `risk.pattern.suspected`는 Redis 판정과 별도로 손실될 수
+있는 best-effort 알림이다. 이 이벤트를 감사 원장이나 전체 거절 집계로 사용하면
+안 된다. 전달 보장이 필요해지면 예약 상태 전이와 같은 원자 경계에 발행 의도를
+저장하고, 재시도·격리·backlog 계측을 함께 마련해야 한다.

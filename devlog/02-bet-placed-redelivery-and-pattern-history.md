@@ -62,6 +62,28 @@ fingerprint dedup 저장소가 없다.
 `risk.limit.violated`로 발행되지 않는다. 이 경우도 `risk_limit_violations_total`과
 응답에는 남는다. 이벤트 수만으로 전체 거절 수를 계산하면 실제보다 작다.
 
+## 발행을 요청한 것과 broker가 받은 것은 다르다
+
+지원하는 한도와 패턴 이벤트도 전달이 확정된 것은 아니다.
+[`RiskEventPublisher`](../src/main/java/com/sportsbook/risk/event/RiskEventPublisher.java)는
+직렬화한 뒤 다음처럼 비동기 전송을 시작하고 반환한다.
+
+```java
+kafka.send(topics.riskLimitViolated(), userId, AvroCodec.encode(event));
+```
+
+반환된 future를 기다리지 않고 `whenComplete` 같은 callback도 붙이지 않는다.
+호출 자체에서 생긴 `RuntimeException`은 예약 흐름에 보일 수 있지만, broker
+확인이 나중에 실패하는 경우에는
+[`RiskReservationService`](../src/main/java/com/sportsbook/risk/reservation/RiskReservationService.java)의
+`try/catch`가 실행을 마친 뒤다. 이미 Redis에 저장한 `RESERVED`·`REJECTED`
+결정이나 HTTP 응답을 되돌리지 않으며 패턴 예약을 해제하지도 않는다.
+
+발행 의도를 남기는 DB나 Redis outbox도 없어서 재시작 뒤 빠진 이벤트를 찾을 수
+없다. 현재 위험 이벤트는 판정의 기준 데이터가 아니라 손실을 허용한 운영 신호다.
+Kafka 이벤트 수가 Redis의 거절·패턴 지표와 다른 이유에는 enum 매핑 누락뿐 아니라
+이 비동기 실패 창도 포함된다.
+
 ## 재전달 검증과 남는 운영 공백
 
 [`BetPlacedConsumerIntegrationTest`](../src/test/java/com/sportsbook/risk/event/BetPlacedConsumerIntegrationTest.java)는

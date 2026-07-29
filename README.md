@@ -17,6 +17,13 @@ admin-api ──HTTP──▶ 사용자 한도 조회와 변경
 risk-service ──Kafka──▶ risk.limit.violated / risk.pattern.suspected
 ```
 
+마지막 두 위험 이벤트는 판정 결과의 내구 저장소가 아닙니다.
+`RiskEventPublisher`는 `KafkaTemplate.send()`가 돌려주는 비동기 결과를 기다리거나
+실패 callback을 등록하지 않습니다. Redis에 저장한 예약 결정과 HTTP 응답은 Kafka의
+나중 실패와 무관하게 유지되며, 발행 실패를 복구할 아웃박스나 재발행 저장소도
+없습니다. 따라서 현재 이벤트는 운영 화면·알림을 위한 best-effort 신호이며, 거절과
+패턴 판정의 기준은 Redis 상태, 응답과 서비스 지표입니다.
+
 패턴용 Redis 스냅샷을 읽어 Java 규칙을 평가한 뒤 그 판정을 예약 Lua에 전달합니다.
 Lua는 만료 예약 정리, 멱등 요청 지문 검사, 확정액과 예약액을 합친 일·주·월/분당
 한도 검사, 전달받은 패턴 판정과 최종 `REJECTED` 또는 `RESERVED` 기록을 한 번에
